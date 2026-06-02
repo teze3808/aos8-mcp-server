@@ -16,6 +16,24 @@ async def _run_show(command: str, config_path: str | None = None) -> dict[str, A
         return await client.show_command(command, config_path=config_path)
 
 
+def _redact_license_keys(result: dict[str, Any]) -> dict[str, Any]:
+    license_rows = result.get("License Table")
+    if not isinstance(license_rows, list):
+        return result
+
+    redacted_rows = []
+    for row in license_rows:
+        if not isinstance(row, dict):
+            redacted_rows.append(row)
+            continue
+        redacted_row = dict(row)
+        if redacted_row.get("Key"):
+            redacted_row["Key"] = "<redacted>"
+        redacted_rows.append(redacted_row)
+
+    return {**result, "License Table": redacted_rows}
+
+
 @mcp.tool()
 async def aos8_test_connection() -> dict[str, Any]:
     """Log in to AOS8 and run a safe version check."""
@@ -65,7 +83,7 @@ async def aos8_get_tunnels() -> dict[str, Any]:
 @mcp.tool()
 async def aos8_get_license_summary() -> dict[str, Any]:
     """Return AOS8 license information."""
-    return await _run_show("show license")
+    return _redact_license_keys(await _run_show("show license"))
 
 
 @mcp.tool()
