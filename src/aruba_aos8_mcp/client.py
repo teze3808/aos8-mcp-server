@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
 
 from aruba_aos8_mcp.config import Settings
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class AOS8ClientError(RuntimeError):

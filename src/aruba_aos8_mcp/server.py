@@ -34,6 +34,63 @@ def _redact_license_keys(result: dict[str, Any]) -> dict[str, Any]:
     return {**result, "License Table": redacted_rows}
 
 
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _switch_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    return [row for row in _as_list(result.get("All Switches")) if isinstance(row, dict)]
+
+
+def _ap_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    return [row for row in _as_list(result.get("AP Database")) if isinstance(row, dict)]
+
+
+def _normalize_switch(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": row.get("Name"),
+        "type": row.get("Type"),
+        "ip_address": row.get("IP Address"),
+        "ipv6_address": row.get("IPv6 Address"),
+        "model": row.get("Model"),
+        "version": row.get("Version"),
+        "status": row.get("Status"),
+        "configuration_state": row.get("Configuration State"),
+        "config_sync_time_seconds": row.get("Config Sync Time (sec)"),
+        "config_id": row.get("Config ID"),
+        "location": row.get("Location"),
+        "release_type": row.get("Release Type"),
+    }
+
+
+def _normalize_ap(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": row.get("Name"),
+        "group": row.get("Group"),
+        "model": f"AP-{row.get('AP Type')}" if row.get("AP Type") else None,
+        "ap_type": row.get("AP Type"),
+        "ip_address": row.get("IP Address"),
+        "status": row.get("Status"),
+        "flags": row.get("Flags"),
+        "active_controller": row.get("Switch IP"),
+        "standby_controller": row.get("Standby IP"),
+        "wired_mac_address": row.get("Wired MAC Address"),
+        "serial": row.get("Serial #"),
+    }
+
+
+def _count_by(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = row.get(key) or "unknown"
+        counts[str(value)] = counts.get(str(value), 0) + 1
+    return counts
+
+
+def _is_up(value: Any) -> bool:
+    return str(value or "").lower().startswith("up")
+
+
 @mcp.tool()
 async def aos8_test_connection() -> dict[str, Any]:
     """Log in to AOS8 and run a safe version check."""
@@ -90,6 +147,79 @@ async def aos8_get_license_summary() -> dict[str, Any]:
 async def aos8_get_cluster_status() -> dict[str, Any]:
     """Return AOS8 cluster membership information."""
     return await _run_show("show lc-cluster group-membership")
+
+
+@mcp.tool()
+async def aos8_get_managed_devices() -> dict[str, Any]:
+    """Return normalized Mobility Conductor and managed-device inventory."""
+    rows = [_normalize_switch(row) for row in _switch_rows(await _run_show("show switches"))]
+    return {
+        "total": len(rows),
+        "up": sum(1 for row in rows if _is_up(row.get("status"))),
+        "down": sum(1 for row in rows if not _is_up(row.get("status"))),
+        "by_type": _count_by(rows, "type"),
+        "devices": rows,
+    }
+
+
+@mcp.tool()
+async def aos8_get_ap_summary() -> dict[str, Any]:
+    """Return normalized AP inventory and AP health summary."""
+    rows = [_normalize_ap(row) for row in _ap_rows(await _run_show("show ap database long"))]
+    return {
+        "total": len(rows),
+        "up": sum(1 for row in rows if _is_up(row.get("status"))),
+        "down": sum(1 for row in rows if not _is_up(row.get("status"))),
+        "by_group": _count_by(rows, "group"),
+        "by_model": _count_by(rows, "model"),
+        "aps": rows,
+    }
+
+
+@mcp.tool()
+async def aos8_get_health_summary() -> dict[str, Any]:
+    """Return a concise AOS8 health summary from safe read-only show commands."""
+    switches = await aos8_get_managed_devices()
+    aps = await aos8_get_ap_summary()
+    clients = await _run_show("show user-table")
+    tunnels = await _run_show("show datapath tunnel")
+
+    client_rows = _as_list(clients.get("Users")) or _as_list(clients.get("User Table"))
+    tunnel_rows = _as_list(tunnels.get("Datapath Tunnel Table"))
+
+    issues: list[str] = []
+    if switches["down"]:
+        issues.append(f"{switches['down']} switch/controller entries are not up")
+    if aps["down"]:
+        issues.append(f"{aps['down']} AP entries are not up")
+    if clients.get("_meta", {}).get("empty_response"):
+        issues.append("Client table returned an empty successful response")
+
+    return {
+        "overall_status": "ok" if not issues else "attention",
+        "issues": issues,
+        "switches": {
+            "total": switches["total"],
+            "up": switches["up"],
+            "down": switches["down"],
+            "by_type": switches["by_type"],
+        },
+        "access_points": {
+            "total": aps["total"],
+            "up": aps["up"],
+            "down": aps["down"],
+            "by_group": aps["by_group"],
+            "by_model": aps["by_model"],
+        },
+        "clients": {
+            "count": len(client_rows),
+            "empty_response": bool(clients.get("_meta", {}).get("empty_response")),
+        },
+        "tunnels": {
+            "count": len(tunnel_rows),
+            "empty_response": bool(tunnels.get("_meta", {}).get("empty_response")),
+        },
+    }
 
 
 def main() -> None:

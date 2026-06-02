@@ -15,6 +15,9 @@ The first version focuses on safe operational inspection through AOS8 login and 
 - `aos8_get_tunnels` - return datapath tunnel information
 - `aos8_get_license_summary` - return license information
 - `aos8_get_cluster_status` - return cluster membership information
+- `aos8_get_managed_devices` - return normalized controller / managed-device inventory
+- `aos8_get_ap_summary` - return normalized AP inventory and AP health summary
+- `aos8_get_health_summary` - return a concise health summary across controllers, APs, clients, and tunnels
 
 ## Setup
 
