@@ -13,6 +13,17 @@ def test_show_command_normalizes_whitespace() -> None:
     assert AOS8Client.validate_show_command("  show version  ") == "show version"
 
 
+def test_config_object_name_validation_accepts_safe_names() -> None:
+    assert AOS8Client.validate_config_object_name("ssid_prof") == "ssid_prof"
+    assert AOS8Client.validate_config_object_name("int_vlan") == "int_vlan"
+    assert AOS8Client.validate_config_object_name("object.name-1") == "object.name-1"
+
+
+def test_config_object_name_validation_rejects_paths() -> None:
+    with pytest.raises(AOS8ClientError):
+        AOS8Client.validate_config_object_name("../write_memory")
+
+
 def test_parse_response_accepts_empty_success_body() -> None:
     response = httpx.Response(200, content=b"")
 

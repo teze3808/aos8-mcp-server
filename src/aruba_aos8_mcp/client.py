@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -8,6 +9,8 @@ import httpx
 from aruba_aos8_mcp.config import Settings
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+CONFIG_OBJECT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class AOS8ClientError(RuntimeError):
@@ -76,11 +79,46 @@ class AOS8Client:
             response = await self._client.get("/v1/configuration/showcommand", params=params)
         return self._parse_response(response)
 
+    async def get_config_object(
+        self,
+        object_name: str,
+        config_path: str = "/md",
+        query_params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_object = self.validate_config_object_name(object_name)
+        normalized_config_path = config_path.strip() or "/md"
+
+        params = {"config_path": normalized_config_path}
+        if query_params:
+            params.update(query_params)
+
+        response = await self._client.get(
+            f"/v1/configuration/object/{normalized_object}",
+            params=params,
+        )
+        if response.status_code == 401:
+            await self.login()
+            response = await self._client.get(
+                f"/v1/configuration/object/{normalized_object}",
+                params=params,
+            )
+        return self._parse_response(response)
+
     @staticmethod
     def validate_show_command(command: str) -> str:
         normalized = command.strip()
         if not normalized.lower().startswith("show "):
             raise AOS8ClientError("Only read-only commands beginning with 'show ' are allowed.")
+        return normalized
+
+    @staticmethod
+    def validate_config_object_name(object_name: str) -> str:
+        normalized = object_name.strip()
+        if not CONFIG_OBJECT_RE.fullmatch(normalized):
+            raise AOS8ClientError(
+                "Configuration object names may only contain letters, numbers, dots, underscores, "
+                "and hyphens."
+            )
         return normalized
 
     @staticmethod

@@ -16,6 +16,20 @@ async def _run_show(command: str, config_path: str | None = None) -> dict[str, A
         return await client.show_command(command, config_path=config_path)
 
 
+async def _get_config_object(
+    object_name: str,
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    settings = get_settings()
+    async with AOS8Client(settings) as client:
+        return await client.get_config_object(
+            object_name,
+            config_path=config_path,
+            query_params=query_params,
+        )
+
+
 def _redact_license_keys(result: dict[str, Any]) -> dict[str, Any]:
     license_rows = result.get("License Table")
     if not isinstance(license_rows, list):
@@ -220,6 +234,56 @@ async def aos8_get_health_summary() -> dict[str, Any]:
             "empty_response": bool(tunnels.get("_meta", {}).get("empty_response")),
         },
     }
+
+
+@mcp.tool()
+async def aos8_get_config_object(
+    object_name: str,
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return a read-only AOS8 configuration object from the hierarchy."""
+    return await _get_config_object(
+        object_name,
+        config_path=config_path,
+        query_params=query_params,
+    )
+
+
+@mcp.tool()
+async def aos8_get_ap_group_config(
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return AP group configuration from the AOS8 configuration datastore."""
+    return await _get_config_object("ap_group", config_path=config_path, query_params=query_params)
+
+
+@mcp.tool()
+async def aos8_get_virtual_ap_profiles(
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return Virtual AP profile configuration from the AOS8 configuration datastore."""
+    return await _get_config_object("virtual_ap", config_path=config_path, query_params=query_params)
+
+
+@mcp.tool()
+async def aos8_get_ssid_profiles(
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return SSID profile configuration from the AOS8 configuration datastore."""
+    return await _get_config_object("ssid_prof", config_path=config_path, query_params=query_params)
+
+
+@mcp.tool()
+async def aos8_get_aaa_profiles(
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return AAA profile configuration from the AOS8 configuration datastore."""
+    return await _get_config_object("aaa_prof", config_path=config_path, query_params=query_params)
 
 
 def main() -> None:

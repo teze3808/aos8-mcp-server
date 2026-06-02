@@ -18,6 +18,11 @@ The first version focuses on safe operational inspection through AOS8 login and 
 - `aos8_get_managed_devices` - return normalized controller / managed-device inventory
 - `aos8_get_ap_summary` - return normalized AP inventory and AP health summary
 - `aos8_get_health_summary` - return a concise health summary across controllers, APs, clients, and tunnels
+- `aos8_get_config_object` - return a read-only configuration object by object name and config path
+- `aos8_get_ap_group_config` - return AP group configuration
+- `aos8_get_virtual_ap_profiles` - return Virtual AP profile configuration
+- `aos8_get_ssid_profiles` - return SSID profile configuration
+- `aos8_get_aaa_profiles` - return AAA profile configuration
 
 ## Setup
 
@@ -82,3 +87,6 @@ git push -u origin main
 ## Safety
 
 This MCP only accepts commands beginning with `show `. It does not expose configuration writes or `write memory`.
+
+Configuration object tools are read-only and use `GET /v1/configuration/object/<object_name>`.
+They do not expose POST or `write_memory`.
