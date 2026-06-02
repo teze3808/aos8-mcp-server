@@ -286,6 +286,124 @@ async def aos8_get_aaa_profiles(
     return await _get_config_object("aaa_prof", config_path=config_path, query_params=query_params)
 
 
+@mcp.prompt()
+def aos8_health_overview() -> str:
+    """Guide an operator-friendly health overview of an AOS8 environment."""
+    return """
+You are an Aruba AOS8 operations assistant. Build a concise health overview using live MCP tools.
+
+Workflow:
+1. Call aos8_get_health_summary.
+2. Call aos8_get_managed_devices and summarize conductor, standby, and managed-device status.
+3. Call aos8_get_ap_summary and summarize AP count by group/model plus any down APs.
+4. If the health summary reports empty clients or tunnels, state that clearly without treating it as a hard failure.
+
+Output:
+- Start with overall status: ok, attention, or degraded.
+- Include short tables for controllers/managed devices and APs.
+- Call out exact issues and likely next checks.
+- Do not paste raw full JSON unless the user asks.
+"""
+
+
+@mcp.prompt()
+def aos8_troubleshoot_ap(ap_name: str = "") -> str:
+    """Guide troubleshooting for one AP or all APs if no AP name is provided."""
+    target = ap_name or "<all APs>"
+    return f"""
+You are troubleshooting AOS8 AP connectivity for: {target}.
+
+Workflow:
+1. Call aos8_get_ap_summary to identify AP status, group, active controller, standby controller, serial, and model.
+2. If ap_name is provided, call aos8_show_command with "show ap details ap-name {target}".
+3. Also check "show ap database long" and, when relevant, "show ap active", "show ap bss-table", and "show ap essid".
+4. If APs are up but BSS/ESSID/radio tables are empty, explain whether that may be due to AP group/profile assignment or query context.
+
+Output:
+- AP identity and uptime.
+- Controller assignment.
+- Group/profile relationship if visible.
+- Findings, likely cause, and next safe command to run.
+"""
+
+
+@mcp.prompt()
+def aos8_wlan_profile_review(config_path: str = "/md") -> str:
+    """Guide a read-only WLAN/profile configuration review."""
+    return f"""
+Review AOS8 WLAN/profile configuration at config_path "{config_path}".
+
+Workflow:
+1. Call aos8_get_ap_group_config with config_path="{config_path}".
+2. Call aos8_get_virtual_ap_profiles with config_path="{config_path}".
+3. Call aos8_get_ssid_profiles with config_path="{config_path}".
+4. Call aos8_get_aaa_profiles with config_path="{config_path}".
+5. Build a WLAN map: AP group -> VAP -> SSID profile -> ESSID -> AAA profile -> VLAN -> forward mode -> security.
+
+Output:
+- A WLAN map table.
+- AP groups and their bound VAPs.
+- SSID/security summary.
+- AAA/server-group summary.
+- Highlight mismatches such as APs in a group that only has a management VAP.
+- Redact passphrases, keys, secrets, and license-like values.
+"""
+
+
+@mcp.prompt()
+def aos8_controller_failover_check() -> str:
+    """Guide a conductor and managed-device redundancy check."""
+    return """
+Check AOS8 controller/conductor redundancy and failover readiness.
+
+Workflow:
+1. Call aos8_get_managed_devices.
+2. Call aos8_get_switches if raw config-sync fields are needed.
+3. Call aos8_get_ap_summary to see active and standby controller assignment for APs.
+4. Call aos8_get_cluster_status and explain empty successful responses as "no LC cluster output from this context" unless other evidence says otherwise.
+
+Output:
+- Conductor and standby status.
+- Managed device status and config sync state.
+- AP active/standby controller distribution.
+- Any failover concerns and next safe checks.
+"""
+
+
+@mcp.prompt()
+def aos8_ap_group_profile_map(config_path: str = "/md") -> str:
+    """Guide mapping AP groups to WLAN profiles."""
+    return f"""
+Map AOS8 AP groups to their WLAN/profile bindings at config_path "{config_path}".
+
+Workflow:
+1. Call aos8_get_ap_summary to see live AP group membership.
+2. Call aos8_get_ap_group_config with config_path="{config_path}".
+3. Call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with the same config_path.
+4. Cross-reference live AP groups against configured AP groups and VAPs.
+
+Output:
+- Live AP group membership.
+- AP group -> VAP bindings.
+- VAP -> SSID/AAA/VLAN/forward-mode bindings.
+- Any group present in live AP inventory but missing from queried config path.
+"""
+
+
+@mcp.prompt()
+def aos8_safe_show_command(command: str) -> str:
+    """Guide safe use of raw AOS8 show commands."""
+    return f"""
+Run and summarize this AOS8 show command: "{command}".
+
+Rules:
+- Only call aos8_show_command if the command starts with "show ".
+- Do not run configuration, write, reload, copy, debug write, or destructive commands.
+- Summarize the useful fields in tables.
+- If output contains secrets, passphrases, keys, license keys, SNMP communities, or ciphertext, redact them.
+"""
+
+
 def main() -> None:
     mcp.run()
 

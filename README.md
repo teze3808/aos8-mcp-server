@@ -24,6 +24,23 @@ The first version focuses on safe operational inspection through AOS8 login and 
 - `aos8_get_ssid_profiles` - return SSID profile configuration
 - `aos8_get_aaa_profiles` - return AAA profile configuration
 
+## Prompts
+
+- `aos8_health_overview` - guided health summary for conductors, managed devices, APs, clients, and tunnels
+- `aos8_troubleshoot_ap` - AP troubleshooting workflow for one AP or all APs
+- `aos8_wlan_profile_review` - WLAN/profile review using config-object GET
+- `aos8_controller_failover_check` - conductor, managed-device, and AP standby assignment review
+- `aos8_ap_group_profile_map` - map AP groups to VAP, SSID, AAA, VLAN, and forward-mode bindings
+- `aos8_safe_show_command` - safe raw `show ...` command helper with redaction guidance
+
+Example prompts to try in an MCP client:
+
+```text
+Use the aos8_health_overview prompt
+Use the aos8_wlan_profile_review prompt with config_path=/md/SE
+Use the aos8_troubleshoot_ap prompt for SE-AP505-AOS8
+```
+
 ## Setup
 
 Install `uv` if you do not already have it, then run:
