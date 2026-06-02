@@ -19,6 +19,7 @@ aos8-mcp-server = "aruba_aos8_mcp.server:main"
 
 [dependency-groups]
 dev = [
+  "pypdf>=6.12.2",
   "pytest>=8.2.0",
   "ruff>=0.5.0",
 ]

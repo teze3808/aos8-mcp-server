@@ -297,11 +297,13 @@ Workflow:
 2. Call aos8_get_managed_devices and summarize conductor, standby, and managed-device status.
 3. Call aos8_get_ap_summary and summarize AP count by group/model plus any down APs.
 4. If the health summary reports empty clients or tunnels, state that clearly without treating it as a hard failure.
+5. Classify any issue by troubleshooting zone: client, infrastructure, or WLAN function/service.
 
 Output:
 - Start with overall status: ok, attention, or degraded.
 - Include short tables for controllers/managed devices and APs.
 - Call out exact issues and likely next checks.
+- Include scope questions when evidence is incomplete: one client or many, one AP or many, one SSID or many, one location or many, and what changed.
 - Do not paste raw full JSON unless the user asks.
 """
 
@@ -318,11 +320,13 @@ Workflow:
 2. If ap_name is provided, call aos8_show_command with "show ap details ap-name {target}".
 3. Also check "show ap database long" and, when relevant, "show ap active", "show ap bss-table", and "show ap essid".
 4. If APs are up but BSS/ESSID/radio tables are empty, explain whether that may be due to AP group/profile assignment or query context.
+5. For AP discovery/registration issues, check DHCP/IP reachability, controller discovery, AP group, LMS/backup LMS, cluster node list behavior, licenses, and platform AP capacity.
 
 Output:
 - AP identity and uptime.
 - Controller assignment.
 - Group/profile relationship if visible.
+- Registration/discovery stage: IP, discovery, tunnel/heartbeat, config download, BSS advertisement.
 - Findings, likely cause, and next safe command to run.
 """
 
@@ -401,6 +405,174 @@ Rules:
 - Do not run configuration, write, reload, copy, debug write, or destructive commands.
 - Summarize the useful fields in tables.
 - If output contains secrets, passphrases, keys, license keys, SNMP communities, or ciphertext, redact them.
+"""
+
+
+@mcp.prompt()
+def aos8_troubleshoot_wlan(config_path: str = "/md", ssid: str = "") -> str:
+    """Guide WLAN troubleshooting from profile config to live state."""
+    target = ssid or "<all WLANs>"
+    return f"""
+You are troubleshooting AOS8 WLAN service for SSID/ESSID: {target}, using config_path "{config_path}".
+
+Workflow:
+1. Call aos8_get_ap_summary to see live AP groups and controller assignment.
+2. Call aos8_get_ap_group_config, aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}".
+3. Build the chain AP group -> Virtual AP -> SSID profile -> ESSID -> AAA profile -> VLAN -> forward mode.
+4. If ssid is provided, filter the chain to the matching ESSID, SSID profile, or VAP name.
+5. Call aos8_show_command for "show ap essid" and "show ap bss-table" to compare configured WLANs with advertised BSS state.
+
+Expert checks:
+- APs are in an AP group that actually references the target VAP.
+- VAP is enabled and references the expected SSID and AAA profiles.
+- SSID security mode matches the intended design.
+- VLAN and forward mode are appropriate for guest/internal/IoT/management use.
+- Client connectivity follows phases: 802.11 negotiation, authentication/encryption, IP addressing, policy/role, and network access.
+- Empty BSS/ESSID output is called out as live-state evidence, not silently ignored.
+
+Output:
+- WLAN chain table.
+- Live advertisement/client evidence.
+- Findings and likely fault domain: AP group, VAP, SSID profile, AAA, VLAN, or controller context.
+- Next safe read-only checks.
+- Redact passphrases and secrets.
+"""
+
+
+@mcp.prompt()
+def aos8_review_ap_group(config_path: str = "/md", ap_group: str = "") -> str:
+    """Guide an expert review of one AP group or all AP groups."""
+    target = ap_group or "<all AP groups>"
+    return f"""
+Review AOS8 AP group configuration for: {target}, using config_path "{config_path}".
+
+Workflow:
+1. Call aos8_get_ap_summary to find live APs using the AP group.
+2. Call aos8_get_ap_group_config with config_path="{config_path}".
+3. Call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}".
+4. For the target AP group, list VAP bindings and supporting profiles.
+
+Expert checks:
+- AP group exists at this config path.
+- Live APs are assigned to the expected AP group.
+- AP group has the intended VAPs.
+- Ethernet port profiles are expected, especially non-default wired profiles.
+- AP system, multizone, Airslice, radio, regulatory, and RF profiles are noted when non-default.
+
+Output:
+- AP group summary.
+- Live AP membership.
+- VAP/profile binding table.
+- Non-default profile highlights.
+- Missing or inherited settings that deserve follow-up.
+"""
+
+
+@mcp.prompt()
+def aos8_security_review(config_path: str = "/md") -> str:
+    """Guide a read-only WLAN security review."""
+    return f"""
+Perform a read-only AOS8 WLAN security review at config_path "{config_path}".
+
+Workflow:
+1. Call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}".
+2. Build a WLAN table with ESSID, security/opmode, AAA profile, server group, default roles, VLAN, and forward mode.
+3. Identify open, enhanced-open, WPA2-PSK, WPA3, MPSK, 802.1X, MAC-auth, and captive-portal style profiles where visible.
+4. Check whether RADIUS accounting, interim accounting, CoA/RFC3576 clients, DHCP enforcement, and downloadable roles are configured.
+
+Output:
+- Security posture table by WLAN.
+- Strong points.
+- Risks or review items, ranked high/medium/low.
+- Exact evidence from config object fields.
+- Redact passphrases, keys, shared secrets, and license-like strings.
+"""
+
+
+@mcp.prompt()
+def aos8_compare_config_paths(path_a: str = "/md", path_b: str = "/md/SE") -> str:
+    """Guide comparison of inherited/effective config across two hierarchy paths."""
+    return f"""
+Compare AOS8 WLAN/profile configuration between "{path_a}" and "{path_b}".
+
+Workflow:
+1. For both paths, call aos8_get_ap_group_config, aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles.
+2. Compare profile names present at each path.
+3. Compare AP group VAP bindings, SSID ESSIDs/security, VAP VLAN/forward mode, and AAA server groups/default roles.
+4. Separate inherited/default settings from explicit settings when the _flags field exposes that detail.
+
+Output:
+- Added/removed/changed profile summary.
+- Side-by-side WLAN map.
+- Inheritance observations.
+- Which path best explains live AP group membership from aos8_get_ap_summary.
+- Redact secrets.
+"""
+
+
+@mcp.prompt()
+def aos8_client_connectivity_review(config_path: str = "/md", client_mac: str = "") -> str:
+    """Guide client connectivity investigation using live state and WLAN profiles."""
+    target = client_mac or "<all clients>"
+    return f"""
+Investigate AOS8 client connectivity for: {target}, using config_path "{config_path}".
+
+Workflow:
+1. Call aos8_get_clients.
+2. If client_mac is provided, call aos8_show_command with "show user-table | include {target}" only if the showcommand API supports the exact command; otherwise explain and use aos8_get_clients output.
+3. Call aos8_get_ap_summary to identify AP groups and controller assignment.
+4. Call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}" to understand WLAN authentication and roles.
+5. If clients are empty, call that out and focus on WLAN/BSS/AP evidence.
+
+Expert checks:
+- Client appears in user table.
+- WLAN/SSID exists and is advertised.
+- AAA profile points to expected server group/default role.
+- VLAN and forward mode match the design.
+- AP group includes the target WLAN VAP.
+- Walk the client phases in order: 802.11 negotiation, authentication/encryption, IP address, policy/role, and network access.
+- If the client is absent from the user table, use WLAN/AP/BSS evidence and suggest monitoring/discovery commands rather than assuming authentication failure.
+- For role/VLAN issues, check initial role, user-derived role, server-derived role, Aruba VSAs/RADIUS attributes, default authentication role, and whether the derived role exists.
+
+Output:
+- Client state evidence.
+- WLAN/profile path likely used by the client.
+- Most likely failure domain.
+- Next safe read-only checks.
+- Redact secrets.
+"""
+
+
+@mcp.prompt()
+def aos8_structured_troubleshooting(issue: str = "") -> str:
+    """Guide a structured Aruba mobility troubleshooting triage."""
+    target = issue or "<reported issue>"
+    return f"""
+Use a structured Aruba AOS8 troubleshooting approach for: {target}.
+
+Workflow:
+1. Scope the blast radius before forming a conclusion:
+   - one client or many clients
+   - one AP or many APs
+   - one SSID or many SSIDs
+   - one location/AP group/controller or multiple
+   - new issue or long-standing issue
+   - recent change in config, code, RF, DHCP, RADIUS, VLAN, routing, or certificates
+2. Classify the problem zone:
+   - client issue
+   - infrastructure issue: AP, controller, tunnel, license, capacity, reachability
+   - WLAN function issue: SSID/VAP/AAA/VLAN/role/RADIUS/policy
+3. Collect live evidence with aos8_get_health_summary, aos8_get_managed_devices, aos8_get_ap_summary, and targeted aos8_show_command calls.
+4. For WLAN/client issues, map evidence across the five client phases: 802.11 negotiation, authentication/encryption, IP addressing, policy/role, and network access.
+5. Use config-object GET tools only for read-only profile evidence.
+
+Output:
+- Problem scope.
+- Fault zone.
+- Evidence table.
+- Most likely fault domain.
+- Next safe read-only checks.
+- Redaction for secrets, keys, passphrases, and license-like values.
 """
 
 
