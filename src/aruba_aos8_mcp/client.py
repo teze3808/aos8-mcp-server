@@ -82,6 +82,9 @@ class AOS8Client:
 
     @staticmethod
     def _parse_response(response: httpx.Response) -> dict[str, Any]:
+        if response.status_code == 200 and not response.content.strip():
+            return {"_data": [], "_meta": {"empty_response": True}}
+
         try:
             data = response.json()
         except ValueError as exc:
