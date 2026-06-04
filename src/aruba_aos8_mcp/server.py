@@ -490,6 +490,35 @@ Output:
 
 
 @mcp.prompt()
+def aos8_hardening_review(config_path: str = "/md") -> str:
+    """Guide a read-only AOS8 hardening review."""
+    return f"""
+Perform a read-only AOS8 hardening review using config_path "{config_path}" where configuration hierarchy matters.
+
+Workflow:
+1. Establish software and topology posture with aos8_get_version, aos8_get_managed_devices, and aos8_get_health_summary.
+2. Review WLAN/security posture with aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles using config_path="{config_path}".
+3. Use safe show commands for management-plane evidence where supported:
+   - "show web-server profile"
+   - "show crypto-local pki trustedCAs"
+   - "show aaa authentication-server all"
+   - "show log security all"
+   - "show snmp trap-host"
+   - "show running-config | include ssh|web-server|snmp|ntp|syslog|firewall"
+4. Check for hardening domains: management access scope, TLS protocol/cipher posture, SSH posture, admin AAA, RADIUS/TACACS usage, SNMP exposure, logging/syslog/accounting, NTP/DNS, certificates, control-plane firewall/ACL posture, and unnecessary services.
+5. For scanner findings such as QOTD/17 or legacy TLS, collect live evidence first and clearly separate possible false positives from confirmed exposure.
+
+Output:
+- Hardening posture table by domain.
+- Evidence collected and commands/tools used.
+- High/medium/low review items.
+- Suggested next read-only checks.
+- Do not prescribe config changes as commands unless the user explicitly asks.
+- Redact secrets, passphrases, SNMP communities, license keys, private keys, and certificate material.
+"""
+
+
+@mcp.prompt()
 def aos8_compare_config_paths(path_a: str = "/md", path_b: str = "/md/SE") -> str:
     """Guide comparison of inherited/effective config across two hierarchy paths."""
     return f"""

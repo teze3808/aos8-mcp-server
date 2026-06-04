@@ -5,6 +5,7 @@ from aruba_aos8_mcp.server import (
     aos8_compare_config_paths,
     aos8_configuration_flow_review,
     aos8_health_overview,
+    aos8_hardening_review,
     aos8_review_ap_group,
     aos8_safe_show_command,
     aos8_security_review,
@@ -85,6 +86,16 @@ def test_security_review_prompt_checks_radius_and_redaction() -> None:
     assert "RADIUS accounting" in prompt
     assert "CoA/RFC3576" in prompt
     assert "Redact passphrases" in prompt
+
+
+def test_hardening_review_prompt_checks_management_plane() -> None:
+    prompt = aos8_hardening_review("/md/SE")
+
+    assert 'config_path "/md/SE"' in prompt
+    assert "management-plane evidence" in prompt
+    assert "TLS protocol/cipher posture" in prompt
+    assert "QOTD/17" in prompt
+    assert "Do not prescribe config changes" in prompt
 
 
 def test_compare_config_paths_prompt_uses_both_paths() -> None:
