@@ -19,6 +19,30 @@ Community MCP server for Aruba AOS8 Mobility Conductor and Mobility Controller e
 - "Plan a new SSID called `LAB-TEST-WIFI` under `/md/Example-Site`."
 - "List native AOS8 configuration objects available from this controller."
 
+## Architecture
+
+```mermaid
+flowchart LR
+    User["Operator / AI user"] --> Client["MCP-capable AI client"]
+    Client --> Server["aos8-mcp-server"]
+    Server --> Tools["MCP tools"]
+    Server --> Prompts["Guided prompts"]
+    Tools --> AOS8API["ArubaOS 8 REST API"]
+    AOS8API --> Controller["Mobility Conductor / Controller"]
+    Controller --> AOS8API
+    AOS8API --> Tools
+    Prompts --> Client
+    Tools --> Client
+    Client --> User
+
+    classDef user fill:#f7f7f7,stroke:#555,color:#111;
+    classDef mcp fill:#dff7ef,stroke:#0b7f5f,color:#102a24;
+    classDef aos fill:#e8f0ff,stroke:#3563c9,color:#102040;
+    class User,Client user;
+    class Server,Tools,Prompts mcp;
+    class AOS8API,Controller aos;
+```
+
 ## Safety Model
 
 This project intentionally separates operational reads from configuration changes.
@@ -31,6 +55,22 @@ This project intentionally separates operational reads from configuration change
 | Stage 4 | Not implemented | Explicit save / `write_memory` |
 
 The current server does not expose POST writes or `write_memory`. The plan-only tool may show what a future POST request could look like, but it does not send that request.
+
+```mermaid
+flowchart TD
+    Ask["User asks for config change"] --> Read["Read current object with GET"]
+    Read --> Plan["Build proposed payload"]
+    Plan --> Diff["Return redacted diff"]
+    Diff --> Stop["Stop: no POST, no write_memory"]
+    Stop -. "future stage only" .-> Confirm["Explicit user confirmation"]
+    Confirm -. "not implemented" .-> Write["POST config object"]
+    Write -. "not implemented" .-> Save["write_memory"]
+
+    classDef safe fill:#dff7ef,stroke:#0b7f5f,color:#102a24;
+    classDef blocked fill:#fff2cc,stroke:#a66a00,color:#332000;
+    class Ask,Read,Plan,Diff,Stop safe;
+    class Confirm,Write,Save blocked;
+```
 
 ## APIs Used
 
