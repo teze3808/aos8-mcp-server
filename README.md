@@ -21,6 +21,7 @@ The first version focuses on safe operational inspection through AOS8 login and 
 - `aos8_get_config_object` - return a read-only configuration object by object name and config path
 - `aos8_list_config_objects` - discover native AOS8 configuration object names exposed by the controller
 - `aos8_list_config_containers` - discover native AOS8 configuration container names exposed by the controller
+- `aos8_plan_config_object_change` - build a redacted plan-only native config-object POST payload and before/after diff without writing
 - `aos8_get_ap_group_config` - return AP group configuration
 - `aos8_get_virtual_ap_profiles` - return Virtual AP profile configuration
 - `aos8_get_ssid_profiles` - return SSID profile configuration
@@ -41,6 +42,7 @@ Prompt text lives in `src/aruba_aos8_mcp/prompts.py`. Edit that file when tailor
 - `aos8_security_review` - read-only WLAN security posture review
 - `aos8_hardening_review` - read-only AOS8 management-plane and WLAN hardening review
 - `aos8_compare_config_paths` - compare inherited/effective WLAN profiles across two hierarchy paths
+- `aos8_config_change_plan` - plan-only workflow for preparing native config-object changes without sending writes
 - `aos8_client_connectivity_review` - client connectivity workflow combining user table, APs, and WLAN profile config
 - `aos8_structured_troubleshooting` - expert triage workflow for scoping, fault-domain classification, and phased evidence collection
 - `aos8_configuration_flow_review` - hierarchy-aware review from config path through AP group, VAP, SSID, AAA, role, VLAN, and live validation
@@ -55,6 +57,7 @@ Use the aos8_troubleshoot_wlan prompt with config_path=/md/SE and ssid=SE-MGMT-A
 Use the aos8_security_review prompt with config_path=/md/SE
 Use the aos8_hardening_review prompt with config_path=/md/SE
 Use the aos8_compare_config_paths prompt with path_a=/md and path_b=/md/SE
+Use the aos8_config_change_plan prompt with object_name=ssid_prof, config_path=/md/SE, and change_goal="rename an ESSID"
 Use the aos8_structured_troubleshooting prompt with issue="guest clients cannot connect"
 Use the aos8_configuration_flow_review prompt with config_path=/md/SE
 ```
@@ -126,4 +129,5 @@ This MCP only accepts commands beginning with `show `. It does not expose config
 Configuration object tools are read-only and use `GET /v1/configuration/object/<object_name>`.
 Discovery tools are read-only and use `GET /v1/configuration/object` and `GET /v1/configuration/container`.
 Discovery results are cached in the MCP process; pass `refresh=true` to force a new controller read.
+Plan-only tools may describe a proposed `POST /v1/configuration/object/<object_name>` request, but they do not send it.
 They do not expose POST or `write_memory`.

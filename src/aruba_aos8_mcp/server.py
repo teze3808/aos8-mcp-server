@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import difflib
+import json
+import re
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -10,6 +13,7 @@ from aruba_aos8_mcp.prompts import (
     aos8_ap_group_profile_map,
     aos8_client_connectivity_review,
     aos8_compare_config_paths,
+    aos8_config_change_plan,
     aos8_configuration_flow_review,
     aos8_controller_failover_check,
     aos8_hardening_review,
@@ -27,11 +31,16 @@ from aruba_aos8_mcp.prompts import (
 mcp = FastMCP("aos8-mcp-server")
 DiscoveryCacheKey = tuple[str, tuple[tuple[str, str], ...]]
 _DISCOVERY_CACHE: dict[DiscoveryCacheKey, dict[str, Any]] = {}
+SENSITIVE_FIELD_RE = re.compile(
+    r"(passphrase|password|passwd|secret|community|license|private.?key|shared.?key|token|credential)",
+    re.IGNORECASE,
+)
 
 __all__ = [
     "aos8_ap_group_profile_map",
     "aos8_client_connectivity_review",
     "aos8_compare_config_paths",
+    "aos8_config_change_plan",
     "aos8_configuration_flow_review",
     "aos8_controller_failover_check",
     "aos8_hardening_review",
@@ -108,6 +117,36 @@ def _redact_license_keys(result: dict[str, Any]) -> dict[str, Any]:
         redacted_rows.append(redacted_row)
 
     return {**result, "License Table": redacted_rows}
+
+
+def _redact_sensitive_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            if SENSITIVE_FIELD_RE.search(str(key)):
+                redacted[key] = "<redacted>"
+            else:
+                redacted[key] = _redact_sensitive_values(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive_values(item) for item in value]
+    return value
+
+
+def _json_lines(value: Any) -> list[str]:
+    return json.dumps(value, indent=2, sort_keys=True).splitlines()
+
+
+def _build_json_diff(before: Any, after: Any) -> list[str]:
+    return list(
+        difflib.unified_diff(
+            _json_lines(_redact_sensitive_values(before)),
+            _json_lines(_redact_sensitive_values(after)),
+            fromfile="current",
+            tofile="proposed",
+            lineterm="",
+        )
+    )
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -328,6 +367,56 @@ async def aos8_list_config_containers(
 ) -> dict[str, Any]:
     """List native Aruba AOS8 configuration container names exposed by the controller."""
     return await _list_config_endpoint("container", query_params=query_params, refresh=refresh)
+
+
+@mcp.tool()
+async def aos8_plan_config_object_change(
+    object_name: str,
+    proposed_payload: dict[str, Any],
+    config_path: str = "/md",
+    query_params: dict[str, str] | None = None,
+    include_current: bool = True,
+) -> dict[str, Any]:
+    """Plan a native AOS8 config-object change without sending any write request."""
+    current = (
+        await _get_config_object(object_name, config_path=config_path, query_params=query_params)
+        if include_current
+        else None
+    )
+
+    params = {"config_path": config_path}
+    if query_params:
+        params.update(query_params)
+
+    current_object_data = None
+    if isinstance(current, dict):
+        data = current.get("_data")
+        if isinstance(data, dict):
+            current_object_data = data.get(object_name)
+
+    before_for_diff = current_object_data if current_object_data is not None else current
+
+    return {
+        "mode": "plan_only",
+        "writes_executed": False,
+        "save_executed": False,
+        "message": "No AOS8 configuration write was sent. This is a proposed change plan only.",
+        "object_name": object_name,
+        "config_path": config_path,
+        "proposed_request": {
+            "method": "POST",
+            "path": f"/v1/configuration/object/{object_name}",
+            "params": params,
+            "body": _redact_sensitive_values(proposed_payload),
+        },
+        "current": _redact_sensitive_values(current) if include_current else None,
+        "diff": _build_json_diff(before_for_diff, proposed_payload) if include_current else [],
+        "warnings": [
+            "Plan-only tool: review payload schema against AOS8 object metadata before enabling writes.",
+            "No write_memory/save operation is included or executed.",
+            "Sensitive-looking fields are redacted in the plan output.",
+        ],
+    }
 
 
 @mcp.tool()

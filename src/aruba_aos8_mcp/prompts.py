@@ -247,6 +247,35 @@ Output:
 """
 
 
+def aos8_config_change_plan(
+    object_name: str = "",
+    config_path: str = "/md",
+    change_goal: str = "",
+) -> str:
+    """Guide plan-only AOS8 configuration change preparation."""
+    target = object_name or "<object_name>"
+    goal = change_goal or "<desired change>"
+    return f"""
+Prepare a plan-only AOS8 configuration change for object "{target}" at config_path "{config_path}".
+
+Change goal:
+{goal}
+
+Workflow:
+1. Confirm the exact native object name. If unsure, call aos8_list_config_objects or ask the user for the object name.
+2. Read the current object with aos8_get_config_object using object_name="{target}" and config_path="{config_path}".
+3. Build a proposed native config-object payload for the requested change.
+4. Call aos8_plan_config_object_change with object_name="{target}", config_path="{config_path}", and the proposed payload.
+5. Stop after the plan. Do not call POST, SET, write_memory, save, reload, or any destructive action.
+
+Output:
+- State clearly that this is plan-only and no configuration write was sent.
+- Show proposed object, config path, payload summary, and redacted diff.
+- List assumptions, schema uncertainties, and exact fields that need operator review.
+- Redact passphrases, keys, shared secrets, SNMP communities, license-like values, tokens, and private key material.
+"""
+
+
 def aos8_client_connectivity_review(config_path: str = "/md", client_mac: str = "") -> str:
     """Guide client connectivity investigation using live state and WLAN profiles."""
     target = client_mac or "<all clients>"
@@ -353,6 +382,7 @@ PROMPTS: tuple[Callable[..., str], ...] = (
     aos8_security_review,
     aos8_hardening_review,
     aos8_compare_config_paths,
+    aos8_config_change_plan,
     aos8_client_connectivity_review,
     aos8_structured_troubleshooting,
     aos8_configuration_flow_review,

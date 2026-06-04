@@ -3,6 +3,7 @@ from aruba_aos8_mcp.server import (
     aos8_controller_failover_check,
     aos8_client_connectivity_review,
     aos8_compare_config_paths,
+    aos8_config_change_plan,
     aos8_configuration_flow_review,
     aos8_health_overview,
     aos8_hardening_review,
@@ -113,6 +114,16 @@ def test_client_connectivity_review_prompt_uses_client_mac() -> None:
     assert "aos8_get_clients" in prompt
     assert "Most likely failure domain" in prompt
     assert "server-derived role" in prompt
+
+
+def test_config_change_plan_prompt_is_plan_only() -> None:
+    prompt = aos8_config_change_plan("ssid_prof", "/md/SE", "rename an ESSID")
+
+    assert 'object "ssid_prof"' in prompt
+    assert 'config_path "/md/SE"' in prompt
+    assert "aos8_plan_config_object_change" in prompt
+    assert "Do not call POST, SET, write_memory, save, reload" in prompt
+    assert "plan-only" in prompt
 
 
 def test_structured_troubleshooting_prompt_scopes_issue() -> None:

@@ -1,4 +1,13 @@
-from aruba_aos8_mcp.server import _normalize_ap, _normalize_switch, _redact_license_keys
+import anyio
+import aruba_aos8_mcp.server as server
+
+from aruba_aos8_mcp.server import (
+    _build_json_diff,
+    _normalize_ap,
+    _normalize_switch,
+    _redact_license_keys,
+    _redact_sensitive_values,
+)
 
 
 def test_redact_license_keys() -> None:
@@ -15,6 +24,81 @@ def test_redact_license_keys() -> None:
             {"Key": None, "Service Type": "MM-VA: 50"},
         ]
     }
+
+
+def test_redact_sensitive_values_recurses() -> None:
+    result = _redact_sensitive_values(
+        {
+            "profile-name": "SE-MGMT-SSID",
+            "wpa_passphrase": {"wpa-passphrase": "do-not-show"},
+            "nested": [{"snmp-community": "also-secret"}],
+        }
+    )
+
+    assert result == {
+        "profile-name": "SE-MGMT-SSID",
+        "wpa_passphrase": "<redacted>",
+        "nested": [{"snmp-community": "<redacted>"}],
+    }
+
+
+def test_build_json_diff_redacts_sensitive_values() -> None:
+    diff = "\n".join(
+        _build_json_diff(
+            {
+                "essid": {"essid": "old-ssid"},
+                "profile-name": "SE-MGMT-SSID",
+                "wpa_passphrase": {"wpa-passphrase": "old"},
+            },
+            {
+                "essid": {"essid": "new-ssid"},
+                "profile-name": "SE-MGMT-SSID",
+                "wpa_passphrase": {"wpa-passphrase": "new"},
+            },
+        )
+    )
+
+    assert '"essid": "old-ssid"' in diff
+    assert '"essid": "new-ssid"' in diff
+    assert '"wpa-passphrase": "old"' not in diff
+    assert '"wpa-passphrase": "new"' not in diff
+    assert "<redacted>" in diff
+
+
+def test_plan_config_object_change_returns_plan_only(monkeypatch) -> None:
+    async def fake_get_config_object(
+        object_name: str,
+        config_path: str = "/md",
+        query_params: dict[str, str] | None = None,
+    ) -> dict:
+        assert object_name == "ssid_prof"
+        assert config_path == "/md/SE"
+        assert query_params is None
+        return {"_data": {"ssid_prof": {"profile-name": "SE-MGMT-SSID", "essid": {"essid": "old"}}}}
+
+    monkeypatch.setattr(server, "_get_config_object", fake_get_config_object)
+
+    async def scenario() -> dict:
+        return await server.aos8_plan_config_object_change(
+            object_name="ssid_prof",
+            config_path="/md/SE",
+            proposed_payload={
+                "profile-name": "SE-MGMT-SSID",
+                "essid": {"essid": "new"},
+                "wpa_passphrase": {"wpa-passphrase": "secret"},
+            },
+        )
+
+    result = anyio.run(scenario)
+
+    assert result["mode"] == "plan_only"
+    assert result["writes_executed"] is False
+    assert result["save_executed"] is False
+    assert result["proposed_request"]["method"] == "POST"
+    assert result["proposed_request"]["path"] == "/v1/configuration/object/ssid_prof"
+    assert result["proposed_request"]["params"] == {"config_path": "/md/SE"}
+    assert result["proposed_request"]["body"]["wpa_passphrase"] == "<redacted>"
+    assert "secret" not in "\n".join(result["diff"])
 
 
 def test_normalize_switch() -> None:
