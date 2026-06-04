@@ -26,6 +26,8 @@ The first version focuses on safe operational inspection through AOS8 login and 
 
 ## Prompts
 
+Prompt text lives in `src/aruba_aos8_mcp/prompts.py`. Edit that file when tailoring expert workflows, then run `uv run pytest` and `uv run ruff check`.
+
 - `aos8_health_overview` - guided health summary for conductors, managed devices, APs, clients, and tunnels
 - `aos8_troubleshoot_ap` - AP troubleshooting workflow for one AP or all APs
 - `aos8_wlan_profile_review` - WLAN/profile review using config-object GET
