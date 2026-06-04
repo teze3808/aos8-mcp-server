@@ -1,5 +1,12 @@
 # aos8-mcp-server
 
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Ruff](https://img.shields.io/badge/linting-Ruff-purple)
+![MCP](https://img.shields.io/badge/MCP-server-0b7f5f)
+![ArubaOS](https://img.shields.io/badge/ArubaOS-8-orange)
+![Status](https://img.shields.io/badge/status-unofficial%20community%20project-lightgrey)
+
 Community MCP server for Aruba AOS8 Mobility Conductor and Mobility Controller environments. It helps HPE Aruba Networking customers, partners, and lab teams inspect AOS8 operational state, read configuration objects, discover native API objects, and prepare plan-only configuration payloads through the Model Context Protocol.
 
 > Warning
