@@ -20,6 +20,9 @@
     <marker id="arrowSlate" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L8,3 z" fill="#496579"/>
     </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#0b7f5f"/>
+    </marker>
     <style>
       .label { font-family: Inter, Segoe UI, Arial, sans-serif; }
       .connector {
@@ -34,6 +37,19 @@
       .connector.c2 { animation-delay: .6s; }
       .connector.c3 { animation-delay: 1.2s; }
       .connector.c4 { animation-delay: 1.8s; }
+      .returnConnector {
+        fill: none;
+        stroke: #0b7f5f;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        marker-end: url(#arrowGreen);
+        opacity: .28;
+        animation: returnPulse 4.8s infinite;
+      }
+      .returnConnector.r1 { animation-delay: 3.6s; }
+      .returnConnector.r2 { animation-delay: 3.0s; }
+      .returnConnector.r3 { animation-delay: 2.4s; }
+      .returnConnector.r4 { animation-delay: 1.8s; }
       .safePulse {
         animation: safePulse 1.8s infinite;
         transform-origin: center;
@@ -41,6 +57,10 @@
       @keyframes pulse {
         0%, 18%, 100% { opacity: .35; stroke-width: 3; }
         8% { opacity: 1; stroke-width: 5; }
+      }
+      @keyframes returnPulse {
+        0%, 18%, 100% { opacity: .28; stroke-width: 2.5; }
+        8% { opacity: .95; stroke-width: 4; }
       }
       @keyframes safePulse {
         0%, 100% { opacity: .45; r: 6; }
@@ -65,6 +85,10 @@
   <path class="connector c2" d="M390 151 H438"/>
   <path class="connector c3" d="M590 151 H638"/>
   <path class="connector c4" d="M790 151 H838"/>
+  <path class="returnConnector r1" d="M238 203 H190"/>
+  <path class="returnConnector r2" d="M438 203 H390"/>
+  <path class="returnConnector r3" d="M638 203 H590"/>
+  <path class="returnConnector r4" d="M838 203 H790"/>
 
   <text x="115" y="142" text-anchor="middle" class="label" font-size="15" font-weight="700" fill="#102040">Operator</text>
   <text x="115" y="163" text-anchor="middle" class="label" font-size="12" fill="#496579">asks a question</text>
