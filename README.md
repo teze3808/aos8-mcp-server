@@ -1,10 +1,11 @@
 # aos8-mcp-server
 
-Community MCP server for Aruba AOS8 Mobility Conductor and Mobility Controller environments. It exposes safe AOS8 operational data, configuration-object reads, discovery, and plan-only configuration workflows to AI assistants through the Model Context Protocol.
+Community MCP server for Aruba AOS8 Mobility Conductor and Mobility Controller environments. It helps HPE Aruba Networking customers, partners, and lab teams inspect AOS8 operational state, read configuration objects, discover native API objects, and prepare plan-only configuration payloads through the Model Context Protocol.
 
 > Warning
 >
-> This is an unofficial community project and is not an HPE-supported product.
+> This is an unofficial and unsupported community project, not an HPE-supported product.
+> It is not affiliated with, endorsed by, or maintained by Hewlett Packard Enterprise or HPE Aruba Networking.
 > Review your organization's device, credential, and AI data-handling policies before connecting any network system to an AI assistant.
 > This server is read-only by default. Plan-only configuration tools can describe proposed AOS8 API requests, but they do not send writes or save configuration.
 
@@ -23,56 +24,16 @@ Community MCP server for Aruba AOS8 Mobility Conductor and Mobility Controller e
 
 ![Animated AOS8 MCP request flow](assets/aos8-mcp-flow.svg)
 
-```mermaid
-flowchart LR
-    User["Operator / AI user"] --> Client["MCP-capable AI client"]
-    Client --> Server["aos8-mcp-server"]
-    Server --> Tools["MCP tools"]
-    Server --> Prompts["Guided prompts"]
-    Tools --> AOS8API["ArubaOS 8 REST API"]
-    AOS8API --> Controller["Mobility Conductor / Controller"]
-    Controller --> AOS8API
-    AOS8API --> Tools
-    Prompts --> Client
-    Tools --> Client
-    Client --> User
+## Operational Scope
 
-    classDef user fill:#f7f7f7,stroke:#555,color:#111;
-    classDef mcp fill:#dff7ef,stroke:#0b7f5f,color:#102a24;
-    classDef aos fill:#e8f0ff,stroke:#3563c9,color:#102040;
-    class User,Client user;
-    class Server,Tools,Prompts mcp;
-    class AOS8API,Controller aos;
-```
+This project intentionally separates operational visibility from configuration execution.
 
-## Safety Model
-
-This project intentionally separates operational reads from configuration changes.
-
-| Stage | Status | Behavior |
-| --- | --- | --- |
-| Stage 1 | Implemented | Read-only show commands and config-object GET |
-| Stage 2 | Implemented | Plan-only configuration payloads and redacted diffs |
-| Stage 3 | Not implemented | Confirmed configuration writes |
-| Stage 4 | Not implemented | Explicit save / `write_memory` |
+- Implemented: read-only show commands through the AOS8 showcommand API.
+- Implemented: read-only configuration object GET for native AOS8 objects.
+- Implemented: plan-only configuration payloads with redacted before/after diffs.
+- Not implemented: configuration POST writes, reloads, or `write_memory`.
 
 The current server does not expose POST writes or `write_memory`. The plan-only tool may show what a future POST request could look like, but it does not send that request.
-
-```mermaid
-flowchart TD
-    Ask["User asks for config change"] --> Read["Read current object with GET"]
-    Read --> Plan["Build proposed payload"]
-    Plan --> Diff["Return redacted diff"]
-    Diff --> Stop["Stop: no POST, no write_memory"]
-    Stop -. "future stage only" .-> Confirm["Explicit user confirmation"]
-    Confirm -. "not implemented" .-> Write["POST config object"]
-    Write -. "not implemented" .-> Save["write_memory"]
-
-    classDef safe fill:#dff7ef,stroke:#0b7f5f,color:#102a24;
-    classDef blocked fill:#fff2cc,stroke:#a66a00,color:#332000;
-    class Ask,Read,Plan,Diff,Stop safe;
-    class Confirm,Write,Save blocked;
-```
 
 ## APIs Used
 
@@ -169,13 +130,35 @@ Try these in an MCP-capable AI client:
 ```text
 Show all AOS8 APs.
 Show controller and managed-device status.
-Show all WLAN/profile configuration under /md/Example-Site.
-Review AOS8 hardening for /md/Example-Site.
-Troubleshoot why clients cannot connect to LAB-CORP-WIFI.
-Compare WLAN profiles between /md and /md/Example-Site.
-Plan a new SSID called LAB-TEST-WIFI under /md/Example-Site.
-List native AOS8 config objects.
+Show AOS8 version and controller uptime.
+Summarize AOS8 health across controllers, APs, clients, and tunnels.
+Show all managed devices and their config sync status.
+Show all APs grouped by AP group and model.
+Show current wireless clients.
+Show AOS8 license summary.
+Show cluster status.
 Run show switches on AOS8.
+Run show ap database on AOS8.
+
+Show all WLAN/profile configuration under /md/Example-Site.
+Map AP groups to VAP, SSID, AAA, VLAN, and forward mode under /md/Example-Site.
+Show SSID profiles under /md/Example-Site.
+Show AAA profiles under /md/Example-Site.
+Show AP group configuration for LAB-AP-GROUP.
+Compare WLAN profiles between /md and /md/Example-Site.
+List native AOS8 config objects.
+List native AOS8 config containers.
+
+Review AOS8 hardening for /md/Example-Site.
+Review WLAN security posture for /md/Example-Site.
+Troubleshoot why clients cannot connect to LAB-CORP-WIFI.
+Troubleshoot AP AP-LAB-01.
+Investigate client aa:bb:cc:dd:ee:ff.
+Use structured troubleshooting for guest clients cannot connect.
+
+Plan a new SSID called LAB-TEST-WIFI under /md/Example-Site.
+Plan changing the ESSID of LAB-CORP-WIFI without writing config.
+Create a plan-only payload to add a VAP to LAB-AP-GROUP.
 ```
 
 ## Setup
@@ -238,6 +221,84 @@ AOS8_REQUEST_TIMEOUT = "30"
 
 Restart the MCP client after editing the config.
 
+### Claude Desktop
+
+Add this to your Claude Desktop MCP configuration after replacing the placeholders:
+
+```json
+{
+  "mcpServers": {
+    "aos8-mcp-server": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/aos8-mcp-server",
+        "aos8-mcp-server"
+      ],
+      "env": {
+        "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
+        "AOS8_USERNAME": "your-username",
+        "AOS8_PASSWORD": "your-password",
+        "AOS8_VERIFY_SSL": "false",
+        "AOS8_REQUEST_TIMEOUT": "30"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after editing the config.
+
+### Claude Code
+
+Claude Code can add a stdio MCP server from JSON:
+
+```bash
+claude mcp add-json aos8-mcp-server '{
+  "type": "stdio",
+  "command": "uv",
+  "args": ["run", "--directory", "/path/to/aos8-mcp-server", "aos8-mcp-server"],
+  "env": {
+    "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
+    "AOS8_USERNAME": "your-username",
+    "AOS8_PASSWORD": "your-password",
+    "AOS8_VERIFY_SSL": "false",
+    "AOS8_REQUEST_TIMEOUT": "30"
+  }
+}'
+```
+
+### Visual Studio Code With GitHub Copilot
+
+VS Code stores MCP server configuration in `mcp.json`, either in your workspace as `.vscode/mcp.json` or in your user profile. Add a server entry like this:
+
+```json
+{
+  "servers": {
+    "aos8-mcp-server": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/aos8-mcp-server",
+        "aos8-mcp-server"
+      ],
+      "env": {
+        "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
+        "AOS8_USERNAME": "your-username",
+        "AOS8_PASSWORD": "your-password",
+        "AOS8_VERIFY_SSL": "false",
+        "AOS8_REQUEST_TIMEOUT": "30"
+      }
+    }
+  }
+}
+```
+
+Save the file and reload/restart the MCP server from VS Code if prompted.
+
 ### Generic Stdio MCP Client
 
 Use this command from the project directory:
@@ -248,30 +309,15 @@ uv run aos8-mcp-server
 
 Pass the `AOS8_*` environment variables through your MCP client config.
 
-## Dev Setup
-
-Run tests and lint:
-
-```bash
-uv run pytest
-uv run ruff check
-```
-
-## Publish To Your Own GitHub Repo
-
-Create an empty GitHub repository, then run:
-
-```bash
-git add .
-git commit -m "Initial aos8-mcp-server"
-git branch -M main
-git remote add origin git@github.com:YOUR-ORG/aos8-mcp-server.git
-git push -u origin main
-```
-
 ## Notes
 
 - AOS8 config object names are native API object names, not always CLI names.
 - Live state is usually best collected through the showcommand API.
 - Configuration intent is usually best collected through config-object GET.
 - Plan-only output is for operator review and schema validation before any future write capability is considered.
+- This project is intended as a community starting point for lab, demo, validation, and operational-assist workflows. Use appropriate review and change-control before adapting it for production operations.
+
+## Client Documentation
+
+- [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp)
+- [VS Code MCP configuration reference](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration)
