@@ -36,8 +36,9 @@
 
   <path id="flowLine" d="M115 151 H890" fill="none" stroke="#9fb1bf" stroke-width="4" stroke-linecap="round" opacity=".55"/>
   <circle r="8" fill="#0b7f5f">
-    <animateMotion dur="4.5s" repeatCount="indefinite" path="M115 151 H890"/>
-    <animate attributeName="opacity" values=".15;1;1;.15" dur="4.5s" repeatCount="indefinite"/>
+    <animateMotion dur="6s" repeatCount="indefinite" path="M115 151 H890 H115"/>
+    <animate attributeName="fill" values="#0b7f5f;#0b7f5f;#3563c9;#3563c9;#0b7f5f" dur="6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".2;1;1;1;.2" dur="6s" repeatCount="indefinite"/>
   </circle>
 
   <g filter="url(#shadow)">
