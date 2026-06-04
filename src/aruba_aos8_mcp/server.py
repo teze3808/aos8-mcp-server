@@ -25,6 +25,8 @@ from aruba_aos8_mcp.prompts import (
 )
 
 mcp = FastMCP("aos8-mcp-server")
+DiscoveryCacheKey = tuple[str, tuple[tuple[str, str], ...]]
+_DISCOVERY_CACHE: dict[DiscoveryCacheKey, dict[str, Any]] = {}
 
 __all__ = [
     "aos8_ap_group_profile_map",
@@ -62,6 +64,32 @@ async def _get_config_object(
             config_path=config_path,
             query_params=query_params,
         )
+
+
+async def _list_config_endpoint(
+    endpoint: str,
+    query_params: dict[str, str] | None = None,
+    *,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    cache_key = (endpoint, tuple(sorted((query_params or {}).items())))
+    if not refresh and cache_key in _DISCOVERY_CACHE:
+        return {
+            **_DISCOVERY_CACHE[cache_key],
+            "_mcp_cache": {"hit": True, "endpoint": endpoint},
+        }
+
+    settings = get_settings()
+    async with AOS8Client(settings) as client:
+        if endpoint == "object":
+            result = await client.list_config_objects(query_params=query_params)
+        elif endpoint == "container":
+            result = await client.list_config_containers(query_params=query_params)
+        else:
+            raise ValueError(f"Unsupported discovery endpoint: {endpoint}")
+
+    _DISCOVERY_CACHE[cache_key] = result
+    return {**result, "_mcp_cache": {"hit": False, "endpoint": endpoint}}
 
 
 def _redact_license_keys(result: dict[str, Any]) -> dict[str, Any]:
@@ -282,6 +310,24 @@ async def aos8_get_config_object(
         config_path=config_path,
         query_params=query_params,
     )
+
+
+@mcp.tool()
+async def aos8_list_config_objects(
+    query_params: dict[str, str] | None = None,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """List native Aruba AOS8 configuration object names exposed by the controller."""
+    return await _list_config_endpoint("object", query_params=query_params, refresh=refresh)
+
+
+@mcp.tool()
+async def aos8_list_config_containers(
+    query_params: dict[str, str] | None = None,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """List native Aruba AOS8 configuration container names exposed by the controller."""
+    return await _list_config_endpoint("container", query_params=query_params, refresh=refresh)
 
 
 @mcp.tool()

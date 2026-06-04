@@ -104,6 +104,26 @@ class AOS8Client:
             )
         return self._parse_response(response)
 
+    async def list_config_objects(
+        self,
+        query_params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        response = await self._client.get("/v1/configuration/object", params=query_params)
+        if response.status_code == 401:
+            await self.login()
+            response = await self._client.get("/v1/configuration/object", params=query_params)
+        return self._parse_response(response)
+
+    async def list_config_containers(
+        self,
+        query_params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        response = await self._client.get("/v1/configuration/container", params=query_params)
+        if response.status_code == 401:
+            await self.login()
+            response = await self._client.get("/v1/configuration/container", params=query_params)
+        return self._parse_response(response)
+
     @staticmethod
     def validate_show_command(command: str) -> str:
         normalized = command.strip()

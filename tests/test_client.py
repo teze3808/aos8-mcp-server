@@ -1,7 +1,23 @@
 import httpx
+import anyio
 import pytest
 
 from aruba_aos8_mcp.client import AOS8Client, AOS8ClientError
+from aruba_aos8_mcp.config import Settings
+
+
+def _client_with_handler(handler: httpx.MockTransport) -> AOS8Client:
+    settings = Settings(
+        base_url="https://aos8.example:4343",
+        username="admin",
+        password="secret",
+    )
+    client = AOS8Client(settings)
+    client._client = httpx.AsyncClient(
+        base_url=settings.normalized_base_url,
+        transport=handler,
+    )
+    return client
 
 
 def test_show_command_rejects_non_show_commands() -> None:
@@ -31,3 +47,44 @@ def test_parse_response_accepts_empty_success_body() -> None:
         "_data": [],
         "_meta": {"empty_response": True},
     }
+
+
+def test_list_config_objects_uses_native_object_endpoint() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"objects": ["ap_group", "ssid_prof"]})
+
+    async def scenario() -> dict:
+        client = _client_with_handler(httpx.MockTransport(handler))
+        try:
+            return await client.list_config_objects({"type": "meta"})
+        finally:
+            await client.close()
+
+    result = anyio.run(scenario)
+
+    assert result == {"objects": ["ap_group", "ssid_prof"]}
+    assert requests[0].url.path == "/v1/configuration/object"
+    assert requests[0].url.params["type"] == "meta"
+
+
+def test_list_config_containers_uses_native_container_endpoint() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"containers": ["configuration", "profile"]})
+
+    async def scenario() -> dict:
+        client = _client_with_handler(httpx.MockTransport(handler))
+        try:
+            return await client.list_config_containers()
+        finally:
+            await client.close()
+
+    result = anyio.run(scenario)
+
+    assert result == {"containers": ["configuration", "profile"]}
+    assert requests[0].url.path == "/v1/configuration/container"
