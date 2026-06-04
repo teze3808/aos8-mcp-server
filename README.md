@@ -38,6 +38,7 @@ The first version focuses on safe operational inspection through AOS8 login and 
 - `aos8_compare_config_paths` - compare inherited/effective WLAN profiles across two hierarchy paths
 - `aos8_client_connectivity_review` - client connectivity workflow combining user table, APs, and WLAN profile config
 - `aos8_structured_troubleshooting` - expert triage workflow for scoping, fault-domain classification, and phased evidence collection
+- `aos8_configuration_flow_review` - hierarchy-aware review from config path through AP group, VAP, SSID, AAA, role, VLAN, and live validation
 
 Example prompts to try in an MCP client:
 
@@ -49,6 +50,7 @@ Use the aos8_troubleshoot_wlan prompt with config_path=/md/SE and ssid=SE-MGMT-A
 Use the aos8_security_review prompt with config_path=/md/SE
 Use the aos8_compare_config_paths prompt with path_a=/md and path_b=/md/SE
 Use the aos8_structured_troubleshooting prompt with issue="guest clients cannot connect"
+Use the aos8_configuration_flow_review prompt with config_path=/md/SE
 ```
 
 ## Setup

@@ -3,6 +3,7 @@ from aruba_aos8_mcp.server import (
     aos8_controller_failover_check,
     aos8_client_connectivity_review,
     aos8_compare_config_paths,
+    aos8_configuration_flow_review,
     aos8_health_overview,
     aos8_review_ap_group,
     aos8_safe_show_command,
@@ -110,3 +111,12 @@ def test_structured_troubleshooting_prompt_scopes_issue() -> None:
     assert "Scope the blast radius" in prompt
     assert "five client phases" in prompt
     assert "client issue" in prompt
+
+
+def test_configuration_flow_review_prompt_is_hierarchy_aware() -> None:
+    prompt = aos8_configuration_flow_review("/md/SE")
+
+    assert 'config_path "/md/SE"' in prompt
+    assert "hierarchy path -> AP group -> Virtual AP" in prompt
+    assert "Named VLAN/VLAN binding" in prompt
+    assert "live operational state" in prompt

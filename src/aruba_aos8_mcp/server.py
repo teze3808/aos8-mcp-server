@@ -576,6 +576,37 @@ Output:
 """
 
 
+@mcp.prompt()
+def aos8_configuration_flow_review(config_path: str = "/md") -> str:
+    """Guide a hierarchy-aware AOS8 configuration-flow review."""
+    return f"""
+Review AOS8 configuration flow at config_path "{config_path}" using a hierarchy-aware approach.
+
+Workflow:
+1. Establish the hierarchy scope first: Mobility Conductor, managed-device node, group path, and whether settings are inherited/default or explicit.
+2. Call aos8_get_managed_devices and aos8_get_ap_summary to confirm live controller/AP state before interpreting config.
+3. Call aos8_get_ap_group_config, aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}".
+4. Build the configuration chain:
+   hierarchy path -> AP group -> Virtual AP -> SSID profile -> ESSID/security -> AAA profile -> role/server group -> VLAN/forward mode.
+5. Validate the live service with safe show commands such as "show ap essid", "show ap bss-table", and "show user-table".
+
+Expert checks:
+- Correct hierarchy path is being queried.
+- AP group used by live APs exists at the queried path.
+- Named VLAN/VLAN binding is present where the VAP expects it.
+- AAA profile maps to expected default role, server group, accounting, and CoA/RFC3576 behavior.
+- Inherited/default values are not mistaken for explicit local configuration.
+- Config exists and live service evidence also exists.
+
+Output:
+- Configuration-flow diagram as a table.
+- Inheritance/default observations.
+- Gaps between config intent and live operational state.
+- Next safe validation commands.
+- Redact passphrases, keys, shared secrets, and license-like values.
+"""
+
+
 def main() -> None:
     mcp.run()
 

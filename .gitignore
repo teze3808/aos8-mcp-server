@@ -10,3 +10,4 @@ dist/
 build/
 *.egg-info/
 ACMX-Aruba Advanced Mobility Troubleshooting and Solutions Rev 20.21/
+references/*.pdf
