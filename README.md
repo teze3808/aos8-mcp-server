@@ -21,6 +21,8 @@ Community MCP server for Aruba AOS8 Mobility Conductor and Mobility Controller e
 
 ## Architecture
 
+![Animated AOS8 MCP request flow](assets/aos8-mcp-flow.svg)
+
 ```mermaid
 flowchart LR
     User["Operator / AI user"] --> Client["MCP-capable AI client"]
