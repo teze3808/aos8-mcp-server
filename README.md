@@ -168,6 +168,166 @@ Plan changing the ESSID of LAB-CORP-WIFI without writing config.
 Create a plan-only payload to add a VAP to LAB-AP-GROUP.
 ```
 
+## Full Example Prompt Replies
+
+These examples show concise prompt/reply output from live AOS8 systems. IP
+addresses, MAC addresses, SSID names, and sensitive values are anonymized.
+
+### Prompt
+
+```text
+Show all AOS8 APs.
+```
+
+### Reply
+
+I found 3 active APs on the standalone AOS8 controller.
+
+| AP | Group | Type | IP | 5 GHz Clients | 2.4 GHz Clients | 6 GHz Clients |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| `AP-OUTDOOR-01` | `AP-GROUP-A` | AP-635 | `<ap-ip-1>` | 4 | 2 | 0 |
+| `AP-INDOOR-01` | `AP-GROUP-A` | AP-635 | `<ap-ip-2>` | 3 | 0 | 0 |
+| `AP-ROOM-01` | `AP-GROUP-A` | AP-505H | `<ap-ip-3>` | 1 | 0 | - |
+
+All active APs are in AP group `AP-GROUP-A`.
+
+---
+
+### Prompt
+
+```text
+Show controller and managed-device status.
+```
+
+### Reply
+
+All controller and managed-device entries are up.
+
+| Name | Type | IP | Model | Version | Status |
+| --- | --- | --- | --- | --- | --- |
+| `OfficeMM` | conductor | `<controller-ip-1>` | ArubaMM-VA | `8.10.0.20_93760` | up |
+| `OfficeMM_bkup` | standby | `<controller-ip-2>` | ArubaMM-VA | `8.10.0.20_93760` | up |
+| `MD1` | MD | `<managed-device-ip-1>` | Aruba7210 | `8.10.0.20_93760` | up |
+| `MD2` | MD | `<managed-device-ip-2>` | Aruba7210 | `8.10.0.20_93760` | up |
+
+---
+
+### Prompt
+
+```text
+Show current wireless clients for <controller-ip>.
+```
+
+### Reply
+
+I found 10 current wireless clients.
+
+| IP | MAC | AP | SSID / Radio | Type | Role |
+| --- | --- | --- | --- | --- | --- |
+| `<client-ip-1>` | `<client-mac-1>` | `AP-OUTDOOR-01` | `<ssid-main> / 2.4GHz` | - | `user-role-a` |
+| `<client-ip-2>` | `<client-mac-2>` | `AP-INDOOR-01` | `<ssid-main> / 5GHz-HE` | macOS | `user-role-a` |
+| `<client-ip-3>` | `<client-mac-3>` | `AP-OUTDOOR-01` | `<ssid-main> / 5GHz-HE` | - | `user-role-a` |
+| `<client-ip-4>` | `<client-mac-4>` | `AP-OUTDOOR-01` | `<ssid-main> / 5GHz-HE` | iPad | `user-role-a` |
+| `<client-ip-5>` | `<client-mac-5>` | `AP-INDOOR-01` | `<ssid-main> / 5GHz-HE` | macOS | `user-role-a` |
+
+AOS8 returned `User Entries: 10/10`.
+
+---
+
+### Prompt
+
+```text
+Investigate client <client-mac>.
+```
+
+### Reply
+
+Client `<client-mac>` is currently connected and authenticated.
+
+| Field | Value |
+| --- | --- |
+| IP | `<client-ip>` |
+| Device type | macOS |
+| SSID | `<ssid-main>` |
+| AP | `AP-INDOOR-01` |
+| BSSID | `<bssid-mac>` |
+| Radio | `5GHz-HE` |
+| PHY | `5GHz-HE-80-2ss` |
+| VLAN | `1` |
+| Role | `user-role-a` |
+| AAA profile | `<aaa-profile>` |
+| Forward mode | tunnel |
+| Association/auth | `assoc=y`, `auth=y` |
+
+RF/session counters looked clean in the returned data.
+
+| Metric | Value |
+| --- | ---: |
+| Client SNR | 48 |
+| Client retry rate | 0% |
+| Client receive error rate | 0% |
+| Client bandwidth rate | 1997 kbps |
+| Channel | 60 |
+
+---
+
+### Prompt
+
+```text
+Review AOS8 hardening.
+```
+
+### Reply
+
+I collected read-only hardening evidence from the AOS8 controller.
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Version posture | Good | AOS-8 `8.13.2.0 LSR`, build `95415` |
+| Device state | Good | Controller status `up`, config `UPDATE SUCCESSFUL` |
+| TLS protocol | Good | Web server allows `tlsv1.2 tlsv1.3` only |
+| Telnet | Good | Telnet CLI and SOE are disabled |
+| SNMP communities | Good | No SNMP communities returned |
+| Admin AAA | Weak | Local admin user shown |
+| Password hash | Weak | `PASSWD-HASH: sha1` |
+| SSH posture | Needs review | DSA enabled; CBC ciphers and SHA1 MACs present |
+| Certificates | Needs review | Web, captive portal, and IDP certs show `default` |
+| WLAN security | Mixed | One WLAN uses WPA2-PSK AES; another uses WPA3-SAE AES |
+
+No configuration changes were made.
+
+---
+
+### Prompt
+
+```text
+Review WLAN security posture.
+```
+
+### Reply
+
+AP group `AP-GROUP-A` has two WLAN profiles.
+
+| WLAN | VAP profile | SSID profile | Encryption | VLAN | Forward mode | Current clients |
+| --- | --- | --- | --- | ---: | --- | ---: |
+| `<ssid-main>` | `<vap-profile-main>` | `<ssid-profile-main>` | `wpa2-psk-aes` | 1 | tunnel | 10 |
+| `<ssid-secure>` | `<vap-profile-secure>` | `<ssid-profile-secure>` | `wpa3-sae-aes` | 1 | tunnel | 0 |
+
+Key observations:
+
+| Observation | Evidence |
+| --- | --- |
+| Active WLAN | All 10 current clients are on `<ssid-main>` |
+| Stronger WLAN exists | `<ssid-secure>` uses `wpa3-sae-aes` |
+| Shared AAA | Both VAPs use the same AAA profile |
+| Shared VLAN | Both VAPs use VLAN `1` |
+| Client isolation | `Deny inter user traffic` is disabled on both VAPs |
+| WPA2 MFP | WPA2 MFP enable/require are both disabled |
+| External AAA | 802.1X server group, RADIUS accounting, and CPPM role download are not configured in the returned AAA profile |
+
+The posture is mixed: WPA3-SAE is configured, but the active client base is still
+on the WPA2-PSK SSID.
+
 ## Setup
 
 Install `uv` if you do not already have it, then run:
