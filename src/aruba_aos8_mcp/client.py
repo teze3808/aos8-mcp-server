@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -23,7 +24,7 @@ class AOS8Client:
         self._csrf_token: str | None = None
         self._client = httpx.AsyncClient(
             base_url=settings.normalized_base_url,
-            verify=settings.verify_ssl,
+            verify=settings.httpx_verify,
             timeout=settings.request_timeout,
             follow_redirects=True,
         )
@@ -42,7 +43,8 @@ class AOS8Client:
             await self.close()
 
     async def login(self) -> dict[str, Any]:
-        response = await self._client.post(
+        response = await self._request(
+            "POST",
             "/v1/api/login",
             data={
                 "username": self.settings.username,
@@ -61,7 +63,7 @@ class AOS8Client:
         return data
 
     async def logout(self) -> dict[str, Any]:
-        response = await self._client.post("/v1/api/logout")
+        response = await self._request("POST", "/v1/api/logout", retry=False)
         if response.status_code in {401, 403, 404}:
             return {"status": "logout skipped", "status_code": response.status_code}
         return self._parse_response(response)
@@ -73,10 +75,10 @@ class AOS8Client:
         if config_path:
             params["config_path"] = config_path
 
-        response = await self._client.get("/v1/configuration/showcommand", params=params)
+        response = await self._request("GET", "/v1/configuration/showcommand", params=params)
         if response.status_code == 401:
             await self.login()
-            response = await self._client.get("/v1/configuration/showcommand", params=params)
+            response = await self._request("GET", "/v1/configuration/showcommand", params=params)
         return self._parse_response(response)
 
     async def get_config_object(
@@ -92,13 +94,15 @@ class AOS8Client:
         if query_params:
             params.update(query_params)
 
-        response = await self._client.get(
+        response = await self._request(
+            "GET",
             f"/v1/configuration/object/{normalized_object}",
             params=params,
         )
         if response.status_code == 401:
             await self.login()
-            response = await self._client.get(
+            response = await self._request(
+                "GET",
                 f"/v1/configuration/object/{normalized_object}",
                 params=params,
             )
@@ -108,21 +112,63 @@ class AOS8Client:
         self,
         query_params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        response = await self._client.get("/v1/configuration/object", params=query_params)
+        response = await self._request("GET", "/v1/configuration/object", params=query_params)
         if response.status_code == 401:
             await self.login()
-            response = await self._client.get("/v1/configuration/object", params=query_params)
+            response = await self._request("GET", "/v1/configuration/object", params=query_params)
         return self._parse_response(response)
 
     async def list_config_containers(
         self,
         query_params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        response = await self._client.get("/v1/configuration/container", params=query_params)
+        response = await self._request("GET", "/v1/configuration/container", params=query_params)
         if response.status_code == 401:
             await self.login()
-            response = await self._client.get("/v1/configuration/container", params=query_params)
+            response = await self._request("GET", "/v1/configuration/container", params=query_params)
         return self._parse_response(response)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        retry: bool = True,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Retry transient transport and API failures without retrying logout."""
+        attempts = self.settings.retry_attempts if retry else 1
+        last_error: httpx.RequestError | None = None
+
+        for attempt in range(attempts):
+            try:
+                response = await self._client.request(method, path, **kwargs)
+            except httpx.RequestError as exc:
+                last_error = exc
+                if attempt == attempts - 1:
+                    break
+                await asyncio.sleep(self._retry_delay(attempt))
+                continue
+
+            if response.status_code == 429 or 500 <= response.status_code <= 599:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(self._retry_delay(attempt, response))
+                    continue
+            return response
+
+        message = f"AOS8 API request failed after {attempts} attempt(s): {method} {path}"
+        if last_error is not None:
+            raise AOS8ClientError(f"{message}: {last_error}") from last_error
+        raise AOS8ClientError(message)
+
+    def _retry_delay(self, attempt: int, response: httpx.Response | None = None) -> float:
+        retry_after = response.headers.get("Retry-After") if response is not None else None
+        if retry_after:
+            try:
+                return min(float(retry_after), 60.0)
+            except ValueError:
+                pass
+        return min(self.settings.retry_backoff_seconds * (2**attempt), 60.0)
 
     @staticmethod
     def validate_show_command(command: str) -> str:

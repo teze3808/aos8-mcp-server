@@ -70,10 +70,12 @@ def test_plan_config_object_change_returns_plan_only(monkeypatch) -> None:
         object_name: str,
         config_path: str = "/md",
         query_params: dict[str, str] | None = None,
+        target_node: str | None = None,
     ) -> dict:
         assert object_name == "ssid_prof"
         assert config_path == "/md/SE"
         assert query_params is None
+        assert target_node is None
         return {"_data": {"ssid_prof": {"profile-name": "SE-MGMT-SSID", "essid": {"essid": "old"}}}}
 
     monkeypatch.setattr(server, "_get_config_object", fake_get_config_object)
@@ -160,3 +162,27 @@ def test_normalize_ap() -> None:
         "wired_mac_address": "34:8a:12:ce:01:f6",
         "serial": "CNLXKPP13H",
     }
+
+
+def test_operation_result_has_stable_metadata(monkeypatch) -> None:
+    from aruba_aos8_mcp.config import Settings
+
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: Settings(
+            base_url="https://aos8.example:4343",
+            username="admin",
+            password="secret",
+        ),
+    )
+
+    result = server._operation_result({"total": 1}, config_path="/md/SE")
+
+    assert result["source"] == "aos8"
+    assert result["target"] == {
+        "name": "default",
+        "base_url": "https://aos8.example:4343",
+        "config_path": "/md/SE",
+    }
+    assert result["data"] == {"total": 1}

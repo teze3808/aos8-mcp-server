@@ -72,6 +72,9 @@ GET  /v1/configuration/object/<object_name>
 | `aos8_get_tunnels` | Return datapath tunnel information |
 | `aos8_get_license_summary` | Return license information with license keys redacted |
 | `aos8_get_cluster_status` | Return cluster membership information |
+| `aos8_list_command_targets` | List the default API endpoint and configured direct node targets |
+| `aos8_get_node_hierarchy` | Return conductor and managed-device nodes with direct-query availability |
+| `aos8_analyze_wlan_security` | Return deterministic WLAN-security findings with configuration evidence |
 
 ### Show Commands
 
@@ -80,6 +83,18 @@ GET  /v1/configuration/object/<object_name>
 | `aos8_show_command` | Run an arbitrary read-only `show ...` command |
 
 Only commands beginning with `show ` are accepted.
+
+Most operational tools accept an optional `target_node`. A target is a named direct
+API endpoint configured in `AOS8_NODE_TARGETS`; this is useful when an operational
+command must run on a managed device instead of the Mobility Conductor context.
+
+### Normalized Results
+
+`aos8_get_managed_devices`, `aos8_get_ap_summary`, and
+`aos8_get_health_summary` return a stable envelope containing `source`,
+`collected_at`, `status`, `target`, `warnings`, and `data`. This gives an AI
+client or a future multi-vendor aggregator consistent fields to combine with
+Aruba Central or Mist results.
 
 ### Configuration Reads
 
@@ -348,11 +363,33 @@ Edit `.env` with your AOS8 controller details:
 AOS8_BASE_URL=https://aos8-controller.example.com:4343
 AOS8_USERNAME=your-username
 AOS8_PASSWORD=your-password
-AOS8_VERIFY_SSL=false
+AOS8_VERIFY_SSL=true
+# AOS8_CA_BUNDLE=/path/to/your-aos8-ca-chain.pem
 AOS8_REQUEST_TIMEOUT=30
+AOS8_RETRY_ATTEMPTS=3
+AOS8_RETRY_BACKOFF_SECONDS=0.5
 ```
 
 Do not commit `.env`.
+
+`AOS8_VERIFY_SSL=true` verifies that the controller presents a certificate
+trusted by the local machine or by `AOS8_CA_BUNDLE`. This protects the MCP
+client from connecting to an impersonated controller. Set it to `false` only
+for a temporary lab connection using a self-signed certificate; it is not an
+appropriate production default.
+
+### Direct Managed-Device Targets
+
+Some AOS8 operational output is specific to a managed-device context. Configure
+direct API targets as JSON, then pass the target name as `target_node` to a
+tool such as `aos8_show_command` or `aos8_get_ap_summary`.
+
+```env
+AOS8_NODE_TARGETS={"SE-VMC-1":{"base_url":"https://md1.example.com:4343","config_path":"/md/SE/DC1"}}
+```
+
+Use `aos8_list_command_targets` to confirm configured names and
+`aos8_get_node_hierarchy` to see which discovered devices have a direct API target.
 
 ## Run Locally
 
@@ -382,7 +419,7 @@ startup_timeout_sec = 30
 AOS8_BASE_URL = "https://aos8-controller.example.com:4343"
 AOS8_USERNAME = "your-username"
 AOS8_PASSWORD = "your-password"
-AOS8_VERIFY_SSL = "false"
+AOS8_VERIFY_SSL = "true"
 AOS8_REQUEST_TIMEOUT = "30"
 ```
 
@@ -407,7 +444,7 @@ Add this to your Claude Desktop MCP configuration after replacing the placeholde
         "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
         "AOS8_USERNAME": "your-username",
         "AOS8_PASSWORD": "your-password",
-        "AOS8_VERIFY_SSL": "false",
+        "AOS8_VERIFY_SSL": "true",
         "AOS8_REQUEST_TIMEOUT": "30"
       }
     }
@@ -430,7 +467,7 @@ claude mcp add-json aos8-mcp-server '{
     "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
     "AOS8_USERNAME": "your-username",
     "AOS8_PASSWORD": "your-password",
-    "AOS8_VERIFY_SSL": "false",
+    "AOS8_VERIFY_SSL": "true",
     "AOS8_REQUEST_TIMEOUT": "30"
   }
 }'
@@ -456,7 +493,7 @@ VS Code stores MCP server configuration in `mcp.json`, either in your workspace 
         "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
         "AOS8_USERNAME": "your-username",
         "AOS8_PASSWORD": "your-password",
-        "AOS8_VERIFY_SSL": "false",
+        "AOS8_VERIFY_SSL": "true",
         "AOS8_REQUEST_TIMEOUT": "30"
       }
     }
@@ -465,6 +502,65 @@ VS Code stores MCP server configuration in `mcp.json`, either in your workspace 
 ```
 
 Save the file and reload/restart the MCP server from VS Code if prompted.
+
+### OpenClaw
+
+Register this local stdio server for OpenClaw-managed agent runs:
+
+```bash
+openclaw mcp add aos8-mcp-server \
+  --command uv \
+  --arg run \
+  --arg=--directory \
+  --arg /path/to/aos8-mcp-server \
+  --arg aos8-mcp-server \
+  --env AOS8_BASE_URL=https://aos8-controller.example.com:4343 \
+  --env AOS8_USERNAME=your-username \
+  --env AOS8_PASSWORD=your-password \
+  --env AOS8_VERIFY_SSL=true \
+  --env AOS8_REQUEST_TIMEOUT=30
+```
+
+Confirm that OpenClaw can start the server and discover its tools:
+
+```bash
+openclaw mcp status --verbose
+openclaw mcp doctor aos8-mcp-server --probe
+```
+
+This configures AOS8 as a tool server for OpenClaw agents. It is different from
+`openclaw mcp serve`, which exposes OpenClaw itself to another MCP client.
+
+### Hermes Agent
+
+Add this local stdio server under `mcp_servers` in `~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  aos8_mcp_server:
+    command: uv
+    args:
+      - run
+      - --directory
+      - /path/to/aos8-mcp-server
+      - aos8-mcp-server
+    env:
+      AOS8_BASE_URL: https://aos8-controller.example.com:4343
+      AOS8_USERNAME: your-username
+      AOS8_PASSWORD: your-password
+      AOS8_VERIFY_SSL: "true"
+      AOS8_REQUEST_TIMEOUT: "30"
+    supports_parallel_tool_calls: false
+```
+
+Restart Hermes after saving the configuration, then ask it to run
+`aos8_test_connection`. Keep parallel tool calls disabled initially to avoid
+unnecessary concurrent polling against the controller; enable it later only
+after confirming the controller and target systems tolerate the expected load.
+
+For either client, keep credentials in the local client configuration, not in
+this repository. For a controller using a certificate signed by an internal CA,
+add `AOS8_CA_BUNDLE` with the path to the local PEM CA chain.
 
 ### Generic Stdio MCP Client
 
@@ -482,6 +578,9 @@ Pass the `AOS8_*` environment variables through your MCP client config.
 - Live state is usually best collected through the showcommand API.
 - Configuration intent is usually best collected through config-object GET.
 - Plan-only output is for operator review and schema validation before any future write capability is considered.
+- Deterministic analyzers return rule IDs, evidence, severity, and recommendations before an AI client summarizes the result. They are useful for local-LLM and no-LLM workflows.
+- Transient timeouts, HTTP `429`, and HTTP `5xx` responses are retried with exponential backoff. Other API errors fail immediately.
+- Package builds and tests run in GitHub Actions on Python 3.11, 3.12, and 3.13.
 - This project is intended as a community starting point for lab, demo, validation, and operational-assist workflows. Use appropriate review and change-control before adapting it for production operations.
 
 ## Client Documentation

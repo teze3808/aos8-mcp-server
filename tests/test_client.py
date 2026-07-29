@@ -88,3 +88,33 @@ def test_list_config_containers_uses_native_container_endpoint() -> None:
 
     assert result == {"containers": ["configuration", "profile"]}
     assert requests[0].url.path == "/v1/configuration/container"
+
+
+def test_get_retries_temporary_server_error() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(503, json={"error": "busy"})
+        return httpx.Response(200, json={"result": "ok"})
+
+    async def scenario() -> dict:
+        settings = Settings(
+            base_url="https://aos8.example:4343",
+            username="admin",
+            password="secret",
+            retry_backoff_seconds=0,
+        )
+        client = AOS8Client(settings)
+        client._client = httpx.AsyncClient(
+            base_url=settings.normalized_base_url,
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            return await client.list_config_objects()
+        finally:
+            await client.close()
+
+    assert anyio.run(scenario) == {"result": "ok"}
+    assert len(requests) == 2
