@@ -145,7 +145,7 @@ Prompt text lives in `src/aruba_aos8_mcp/prompts.py`. Edit that file when tailor
 | `aos8_structured_troubleshooting` | "Use a structured troubleshooting workflow for a reported issue." |
 | `aos8_configuration_flow_review` | "Review config flow from hierarchy path to AP group, VAP, SSID, AAA, role, VLAN, and live state." |
 
-## Example Questions
+## Example Prompts
 
 Try these in an MCP-capable AI client:
 
