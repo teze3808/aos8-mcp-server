@@ -3,6 +3,7 @@ import aruba_aos8_mcp.server as server
 import pytest
 
 from aruba_aos8_mcp.client import AOS8ClientError
+from aruba_aos8_mcp.config import Settings
 from aruba_aos8_mcp.server import (
     _build_json_diff,
     _bound_raw_result,
@@ -12,6 +13,16 @@ from aruba_aos8_mcp.server import (
     _redact_license_keys,
     _redact_sensitive_values,
 )
+
+
+@pytest.fixture(autouse=True)
+def configured_server_settings(monkeypatch) -> None:
+    settings = Settings(
+        base_url="https://aos8.example:4343",
+        username="admin",
+        password="test-only-secret",
+    )
+    monkeypatch.setattr(server, "get_settings", lambda: settings)
 
 
 def test_redact_license_keys() -> None:
