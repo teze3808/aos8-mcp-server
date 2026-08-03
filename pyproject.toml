@@ -1,6 +1,6 @@
 [project]
 name = "aos8-mcp-server"
-version = "0.2.0"
+version = "0.3.0"
 description = "Read-only, node-aware MCP server for Aruba AOS8 operations."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,9 +19,9 @@ classifiers = [
 ]
 dependencies = [
   "httpx>=0.27.0",
-  "mcp>=1.2.0",
+  "mcp>=1.28.1,<2",
   "pydantic>=2.7.0",
-  "pydantic-settings>=2.3.0",
+  "pydantic-settings>=2.14.2",
 ]
 
 [project.scripts]
@@ -34,7 +34,8 @@ Issues = "https://github.com/teze3808/aos8-mcp-server/issues"
 
 [dependency-groups]
 dev = [
-  "pypdf>=6.12.2",
+  "pip-audit>=2.10.1",
+  "pypdf>=6.14.2",
   "pytest>=8.2.0",
   "ruff>=0.5.0",
 ]

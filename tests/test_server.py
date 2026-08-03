@@ -1,9 +1,13 @@
 import anyio
 import aruba_aos8_mcp.server as server
+import pytest
 
+from aruba_aos8_mcp.client import AOS8ClientError
 from aruba_aos8_mcp.server import (
     _build_json_diff,
+    _bound_raw_result,
     _normalize_ap,
+    _normalize_client,
     _normalize_switch,
     _redact_license_keys,
     _redact_sensitive_values,
@@ -40,6 +44,42 @@ def test_redact_sensitive_values_recurses() -> None:
         "wpa_passphrase": "<redacted>",
         "nested": [{"snmp-community": "<redacted>"}],
     }
+
+
+def test_redact_sensitive_values_preserves_license_inventory() -> None:
+    result = _redact_sensitive_values(
+        {"License Table": [{"License Type": "AP", "License Key": "secret"}]}
+    )
+
+    assert result == {
+        "License Table": [{"License Type": "AP", "License Key": "<redacted>"}]
+    }
+
+
+def test_redact_sensitive_values_redacts_sensitive_text_lines() -> None:
+    result = _redact_sensitive_values("username admin\npassword super-secret\nsnmp-community public")
+
+    assert result == "username admin\npassword <redacted>\nsnmp-community <redacted>"
+
+
+def test_bound_raw_result_truncates_large_output(monkeypatch) -> None:
+    from aruba_aos8_mcp.config import Settings
+
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: Settings(
+            base_url="https://aos8.example:4343",
+            username="admin",
+            password="secret",
+            max_result_characters=1_000,
+        ),
+    )
+
+    result = _bound_raw_result({"output": "x" * 2_000})
+
+    assert result["_meta"]["truncated"] is True
+    assert result["_meta"]["original_characters"] > 1_000
 
 
 def test_build_json_diff_redacts_sensitive_values() -> None:
@@ -103,6 +143,19 @@ def test_plan_config_object_change_returns_plan_only(monkeypatch) -> None:
     assert "secret" not in "\n".join(result["diff"])
 
 
+def test_plan_config_object_change_validates_query_params_without_current() -> None:
+    async def call() -> dict[str, object]:
+        return await server.aos8_plan_config_object_change(
+            "ssid_prof",
+            {"profile-name": "Test"},
+            query_params={"bad parameter": "value"},
+            include_current=False,
+        )
+
+    with pytest.raises(AOS8ClientError, match="Invalid query parameter"):
+        anyio.run(call)
+
+
 def test_normalize_switch() -> None:
     row = {
         "Name": "SE-VMM-1",
@@ -161,6 +214,34 @@ def test_normalize_ap() -> None:
         "standby_controller": "192.168.15.52",
         "wired_mac_address": "34:8a:12:ce:01:f6",
         "serial": "CNLXKPP13H",
+    }
+
+
+def test_normalize_client_accepts_common_aos8_fields() -> None:
+    assert _normalize_client(
+        {
+            "IP": "192.0.2.100",
+            "MAC": "aa:bb:cc:dd:ee:ff",
+            "AP name": "AP-01",
+            "ESSID": "CORP",
+            "VLAN": 100,
+            "Role": "employee",
+        }
+    ) == {
+        "ip_address": "192.0.2.100",
+        "mac_address": "aa:bb:cc:dd:ee:ff",
+        "username": None,
+        "device_type": None,
+        "ap_name": "AP-01",
+        "ssid": "CORP",
+        "bssid": None,
+        "radio": None,
+        "phy": None,
+        "vlan": 100,
+        "role": "employee",
+        "aaa_profile": None,
+        "association_state": None,
+        "authentication_state": None,
     }
 
 

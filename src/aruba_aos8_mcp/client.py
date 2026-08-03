@@ -12,6 +12,15 @@ from aruba_aos8_mcp.config import Settings
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 CONFIG_OBJECT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+QUERY_PARAM_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+DISALLOWED_SHOW_COMMAND_RE = re.compile(
+    r"\b(?:running-config|startup-config|write\s+memory|copy\s+\S+|debug|reload)\b",
+    re.IGNORECASE,
+)
+ALLOWED_SHOW_PIPE_RE = re.compile(r"^show\s+[^|;]+\s+\|\s+include\s+[^|;]+$", re.IGNORECASE)
+MAX_SHOW_COMMAND_LENGTH = 300
+MAX_QUERY_PARAMS = 20
+MAX_QUERY_PARAM_VALUE_LENGTH = 500
 
 
 class AOS8ClientError(RuntimeError):
@@ -92,7 +101,7 @@ class AOS8Client:
 
         params = {"config_path": normalized_config_path}
         if query_params:
-            params.update(query_params)
+            params.update(self.validate_query_params(query_params))
 
         response = await self._request(
             "GET",
@@ -112,20 +121,22 @@ class AOS8Client:
         self,
         query_params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        response = await self._request("GET", "/v1/configuration/object", params=query_params)
+        params = self.validate_query_params(query_params)
+        response = await self._request("GET", "/v1/configuration/object", params=params)
         if response.status_code == 401:
             await self.login()
-            response = await self._request("GET", "/v1/configuration/object", params=query_params)
+            response = await self._request("GET", "/v1/configuration/object", params=params)
         return self._parse_response(response)
 
     async def list_config_containers(
         self,
         query_params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        response = await self._request("GET", "/v1/configuration/container", params=query_params)
+        params = self.validate_query_params(query_params)
+        response = await self._request("GET", "/v1/configuration/container", params=params)
         if response.status_code == 401:
             await self.login()
-            response = await self._request("GET", "/v1/configuration/container", params=query_params)
+            response = await self._request("GET", "/v1/configuration/container", params=params)
         return self._parse_response(response)
 
     async def _request(
@@ -175,6 +186,19 @@ class AOS8Client:
         normalized = command.strip()
         if not normalized.lower().startswith("show "):
             raise AOS8ClientError("Only read-only commands beginning with 'show ' are allowed.")
+        if len(normalized) > MAX_SHOW_COMMAND_LENGTH:
+            raise AOS8ClientError(
+                f"Show commands may not exceed {MAX_SHOW_COMMAND_LENGTH} characters."
+            )
+        if DISALLOWED_SHOW_COMMAND_RE.search(normalized):
+            raise AOS8ClientError(
+                "This show command is blocked because it can expose sensitive configuration or "
+                "invoke an unsafe operational action. Use a focused read-only tool instead."
+            )
+        if "|" in normalized and not ALLOWED_SHOW_PIPE_RE.fullmatch(normalized):
+            raise AOS8ClientError("Only a single '| include <text>' filter is allowed in show commands.")
+        if any(character in normalized for character in (";", "\n", "\r", "`", "$")):
+            raise AOS8ClientError("Show command contains disallowed shell-like characters.")
         return normalized
 
     @staticmethod
@@ -188,6 +212,23 @@ class AOS8Client:
         return normalized
 
     @staticmethod
+    def validate_query_params(query_params: dict[str, str] | None) -> dict[str, str]:
+        """Bound native API filters without exposing arbitrary request construction."""
+        if not query_params:
+            return {}
+        if len(query_params) > MAX_QUERY_PARAMS:
+            raise AOS8ClientError(f"At most {MAX_QUERY_PARAMS} query parameters are allowed.")
+
+        validated: dict[str, str] = {}
+        for key, value in query_params.items():
+            if not QUERY_PARAM_KEY_RE.fullmatch(key):
+                raise AOS8ClientError(f"Invalid query parameter name: {key!r}")
+            if len(value) > MAX_QUERY_PARAM_VALUE_LENGTH or any(char in value for char in ("\n", "\r")):
+                raise AOS8ClientError(f"Invalid or oversized value for query parameter: {key}")
+            validated[key] = value
+        return validated
+
+    @staticmethod
     def _parse_response(response: httpx.Response) -> dict[str, Any]:
         if response.status_code == 200 and not response.content.strip():
             return {"_data": [], "_meta": {"empty_response": True}}
@@ -195,13 +236,12 @@ class AOS8Client:
         try:
             data = response.json()
         except ValueError as exc:
-            snippet = response.text[:300]
             raise AOS8ClientError(
-                f"AOS8 returned non-JSON response: HTTP {response.status_code}: {snippet}"
+                f"AOS8 returned a non-JSON response: HTTP {response.status_code}."
             ) from exc
 
         if response.is_error:
-            raise AOS8ClientError(f"AOS8 API error: HTTP {response.status_code}: {data}")
+            raise AOS8ClientError(f"AOS8 API error: HTTP {response.status_code}.")
 
         if not isinstance(data, dict):
             return {"result": data}

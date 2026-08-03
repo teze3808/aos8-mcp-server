@@ -115,6 +115,7 @@ Run and summarize this AOS8 show command: "{command}".
 
 Rules:
 - Only call aos8_show_command if the command starts with "show ".
+- Do not request running/startup configuration, command output containing private keys, or shell-like command chaining.
 - Do not run configuration, write, reload, copy, debug write, or destructive commands.
 - Summarize the useful fields in tables.
 - If output contains secrets, passphrases, keys, license keys, SNMP communities, or ciphertext, redact them.
@@ -185,8 +186,8 @@ def aos8_security_review(config_path: str = "/md") -> str:
 Perform a read-only AOS8 WLAN security review at config_path "{config_path}".
 
 Workflow:
-1. Call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}".
-2. Build a WLAN table with ESSID, security/opmode, AAA profile, server group, default roles, VLAN, and forward mode.
+1. Call aos8_get_wlan_summary with config_path="{config_path}" for normalized relationships and deterministic findings.
+2. If supporting native fields are needed, call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with the same path.
 3. Identify open, enhanced-open, WPA2-PSK, WPA3, MPSK, 802.1X, MAC-auth, and captive-portal style profiles where visible.
 4. Check whether RADIUS accounting, interim accounting, CoA/RFC3576 clients, DHCP enforcement, and downloadable roles are configured.
 
@@ -213,7 +214,8 @@ Workflow:
    - "show aaa authentication-server all"
    - "show log security all"
    - "show snmp trap-host"
-   - "show running-config | include ssh|web-server|snmp|ntp|syslog|firewall"
+   - Use focused configuration-object reads and the listed safe show commands instead of
+     retrieving `show running-config`, which can expose sensitive configuration.
 4. Check for hardening domains: management access scope, TLS protocol/cipher posture, SSH posture, admin AAA, RADIUS/TACACS usage, SNMP exposure, logging/syslog/accounting, NTP/DNS, certificates, control-plane firewall/ACL posture, and unnecessary services.
 5. For scanner findings such as QOTD/17 or legacy TLS, collect live evidence first and clearly separate possible false positives from confirmed exposure.
 
@@ -283,8 +285,8 @@ def aos8_client_connectivity_review(config_path: str = "/md", client_mac: str = 
 Investigate AOS8 client connectivity for: {target}, using config_path "{config_path}".
 
 Workflow:
-1. Call aos8_get_clients.
-2. If client_mac is provided, call aos8_show_command with "show user-table | include {target}" only if the showcommand API supports the exact command; otherwise explain and use aos8_get_clients output.
+1. Call aos8_get_client_summary.
+2. If client_mac is provided, call aos8_show_command with "show user-table | include {target}" only if the showcommand API supports the exact command; otherwise explain and use aos8_get_client_summary output.
 3. Call aos8_get_ap_summary to identify AP groups and controller assignment.
 4. Call aos8_get_virtual_ap_profiles, aos8_get_ssid_profiles, and aos8_get_aaa_profiles with config_path="{config_path}" to understand WLAN authentication and roles.
 5. If clients are empty, call that out and focus on WLAN/BSS/AP evidence.

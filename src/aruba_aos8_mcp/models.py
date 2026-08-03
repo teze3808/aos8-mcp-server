@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 class ToolTarget(BaseModel):
     name: str = "default"
-    base_url: str
+    base_url: str | None = None
     config_path: str | None = None
 
 
@@ -54,6 +54,37 @@ class AccessPoint(BaseModel):
     serial: str | None = None
 
 
+class WirelessClient(BaseModel):
+    ip_address: str | None = None
+    mac_address: str | None = None
+    username: str | None = None
+    device_type: str | None = None
+    ap_name: str | None = None
+    ssid: str | None = None
+    bssid: str | None = None
+    radio: str | None = None
+    phy: str | None = None
+    vlan: str | int | None = None
+    role: str | None = None
+    aaa_profile: str | None = None
+    association_state: str | None = None
+    authentication_state: str | None = None
+
+
+class WLANProfile(BaseModel):
+    name: str
+    essid: str | None = None
+    virtual_ap_profile: str | None = None
+    ssid_profile: str | None = None
+    aaa_profile: str | None = None
+    security: str | None = None
+    vlan: str | int | None = None
+    forward_mode: str | None = None
+    server_group: str | None = None
+    default_role: str | None = None
+    ap_groups: list[str] = Field(default_factory=list)
+
+
 class Finding(BaseModel):
     id: str
     severity: Literal["high", "medium", "low", "info"]
@@ -61,3 +92,5 @@ class Finding(BaseModel):
     evidence: list[str]
     recommendation: str
     affected_objects: list[str] = Field(default_factory=list)
+    confidence: Literal["high", "medium", "low"] = "high"
+    rule_version: str = "1"

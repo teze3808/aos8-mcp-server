@@ -69,6 +69,8 @@ GET  /v1/configuration/object/<object_name>
 | `aos8_get_ap_summary` | Return normalized AP inventory and AP health summary |
 | `aos8_get_health_summary` | Return a concise health summary across controllers, APs, clients, and tunnels |
 | `aos8_get_clients` | Return wireless user table |
+| `aos8_get_client_summary` | Return normalized client inventory and counts by SSID, AP, and role |
+| `aos8_get_wlan_summary` | Return normalized WLAN relationships and deterministic security findings |
 | `aos8_get_tunnels` | Return datapath tunnel information |
 | `aos8_get_license_summary` | Return license information with license keys redacted |
 | `aos8_get_cluster_status` | Return cluster membership information |
@@ -80,9 +82,21 @@ GET  /v1/configuration/object/<object_name>
 
 | Tool | Description |
 | --- | --- |
-| `aos8_show_command` | Run an arbitrary read-only `show ...` command |
+| `aos8_show_command` | Run a bounded, read-only `show ...` command |
 
-Only commands beginning with `show ` are accepted.
+Only commands beginning with `show ` are accepted. Running/startup configuration,
+debug/reload/copy patterns, shell-like characters, and pipes other than one
+`| include <text>` filter are blocked. Raw tool output is redacted server-side
+and capped by `AOS8_MAX_RESULT_CHARACTERS` before it reaches the MCP client.
+Downstream-call audit events contain only operation, target alias, outcome,
+latency, and response size; they are emitted through standard logging to stderr,
+never MCP stdout.
+
+The built-in command policy supports the commands used by the guided workflows.
+Additional command prefixes must be explicitly reviewed and configured with
+`AOS8_ADDITIONAL_SHOW_COMMAND_PREFIXES`. Configuration-object reads and plan-only
+changes are restricted by `AOS8_ALLOWED_CONFIG_OBJECTS` and
+`AOS8_ALLOWED_CONFIG_PATH_ROOTS`.
 
 Most operational tools accept an optional `target_node`. A target is a named direct
 API endpoint configured in `AOS8_NODE_TARGETS`; this is useful when an operational
@@ -368,9 +382,24 @@ AOS8_VERIFY_SSL=true
 AOS8_REQUEST_TIMEOUT=30
 AOS8_RETRY_ATTEMPTS=3
 AOS8_RETRY_BACKOFF_SECONDS=0.5
+AOS8_MAX_RESULT_CHARACTERS=200000
+AOS8_ALLOWED_CONFIG_OBJECTS=["aaa_prof","ap_group","ssid_prof","virtual_ap"]
+AOS8_ALLOWED_CONFIG_PATH_ROOTS=["/md","/mm"]
+AOS8_ADDITIONAL_SHOW_COMMAND_PREFIXES=[]
+# AOS8_AUDIT_LOG_PATH=/path/to/aos8-mcp-audit.jsonl
 ```
 
 Do not commit `.env`.
+
+This project is designed for a trusted, single-user local `stdio` deployment.
+Before exposing it remotely or to multiple users, add an authenticated transport,
+server-side authorization by user and target, a managed secret store, durable
+audit retention, and deployment-specific network policy.
+
+When `AOS8_AUDIT_LOG_PATH` is configured, the parent directory must already
+exist and be writable by the MCP process. The rotating JSONL records contain a
+correlation ID, operation, action class, target alias, outcome, latency, and
+response size. They never contain controller output, tool payloads, or credentials.
 
 `AOS8_VERIFY_SSL=true` verifies that the controller presents a certificate
 trusted by the local machine or by `AOS8_CA_BUNDLE`. This protects the MCP
@@ -581,6 +610,18 @@ Pass the `AOS8_*` environment variables through your MCP client config.
 - Deterministic analyzers return rule IDs, evidence, severity, and recommendations before an AI client summarizes the result. They are useful for local-LLM and no-LLM workflows.
 - Transient timeouts, HTTP `429`, and HTTP `5xx` responses are retried with exponential backoff. Other API errors fail immediately.
 - Package builds and tests run in GitHub Actions on Python 3.11, 3.12, and 3.13.
+- The centralized policy is deterministic and enforced below the MCP prompt layer.
+- See [SECURITY.md](SECURITY.md), [RUNBOOK.md](RUNBOOK.md), and [CHANGELOG.md](CHANGELOG.md) before production-like use.
+
+## Compatibility
+
+| Component | Current status |
+| --- | --- |
+| Python | CI tested on 3.11, 3.12, and 3.13 |
+| AOS8 8.10 | Example outputs and normalization fixtures available |
+| AOS8 8.13 | Example outputs and normalization fixtures available |
+| Transport | Local `stdio` |
+| Remote/multi-user MCP | Not currently supported |
 - This project is intended as a community starting point for lab, demo, validation, and operational-assist workflows. Use appropriate review and change-control before adapting it for production operations.
 
 ## Client Documentation

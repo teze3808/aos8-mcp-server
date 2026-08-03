@@ -1,4 +1,8 @@
-from aruba_aos8_mcp.analyzers import analyze_inventory_health, analyze_wlan_security
+from aruba_aos8_mcp.analyzers import (
+    analyze_inventory_health,
+    analyze_wlan_security,
+    build_wlan_profiles,
+)
 
 
 def test_inventory_health_returns_machine_readable_finding() -> None:
@@ -26,3 +30,33 @@ def test_wlan_security_detects_open_and_wpa2_psk() -> None:
         ("AOS8-WLAN-001", "high"),
         ("AOS8-WLAN-002", "medium"),
     }
+    assert {finding.affected_objects[0] for finding in findings} == {"guest", "legacy"}
+
+
+def test_build_wlan_profiles_maps_vap_ssid_aaa_and_ap_group() -> None:
+    config = {
+        "virtual_ap": [
+            {
+                "profile-name": "corp-vap",
+                "ssid-profile": "corp-ssid",
+                "aaa-profile": "corp-aaa",
+                "vlan": 100,
+                "forward-mode": "tunnel",
+            }
+        ],
+        "ssid_prof": [
+            {"profile-name": "corp-ssid", "essid": "CORP", "opmode": "wpa3-sae-aes"}
+        ],
+        "aaa_prof": [
+            {"profile-name": "corp-aaa", "server-group": "radius", "default-role": "user"}
+        ],
+        "ap_group": [{"profile-name": "office", "virtual-ap": ["corp-vap"]}],
+    }
+
+    wlan = build_wlan_profiles(config)[0]
+
+    assert wlan.name == "CORP"
+    assert wlan.ssid_profile == "corp-ssid"
+    assert wlan.aaa_profile == "corp-aaa"
+    assert wlan.vlan == 100
+    assert wlan.ap_groups == ["office"]

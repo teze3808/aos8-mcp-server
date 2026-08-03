@@ -84,6 +84,7 @@ def test_review_ap_group_prompt_names_target_group() -> None:
 def test_security_review_prompt_checks_radius_and_redaction() -> None:
     prompt = aos8_security_review("/md/SE")
 
+    assert "aos8_get_wlan_summary" in prompt
     assert "RADIUS accounting" in prompt
     assert "CoA/RFC3576" in prompt
     assert "Redact passphrases" in prompt
@@ -111,7 +112,7 @@ def test_client_connectivity_review_prompt_uses_client_mac() -> None:
     prompt = aos8_client_connectivity_review("/md/SE", "aa:bb:cc:dd:ee:ff")
 
     assert "aa:bb:cc:dd:ee:ff" in prompt
-    assert "aos8_get_clients" in prompt
+    assert "aos8_get_client_summary" in prompt
     assert "Most likely failure domain" in prompt
     assert "server-derived role" in prompt
 

@@ -3,14 +3,28 @@ from __future__ import annotations
 import difflib
 import json
 import re
+import time
 from typing import Any
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
+from aruba_aos8_mcp.audit import configure_audit_logging, emit_audit_event
+from aruba_aos8_mcp.analyzers import (
+    analyze_inventory_health,
+    analyze_wlan_security,
+    build_wlan_profiles,
+)
 from aruba_aos8_mcp.client import AOS8Client, AOS8ClientError
 from aruba_aos8_mcp.config import get_settings
-from aruba_aos8_mcp.analyzers import analyze_inventory_health, analyze_wlan_security
-from aruba_aos8_mcp.models import AccessPoint, ManagedDevice, OperationResult, ToolTarget
+from aruba_aos8_mcp.models import (
+    AccessPoint,
+    ManagedDevice,
+    OperationResult,
+    ToolTarget,
+    WirelessClient,
+)
+from aruba_aos8_mcp.policy import get_policy
 from aruba_aos8_mcp.prompts import (
     aos8_ap_group_profile_map,
     aos8_client_connectivity_review,
@@ -34,8 +48,12 @@ mcp = FastMCP("aos8-mcp-server")
 DiscoveryCacheKey = tuple[str, tuple[tuple[str, str], ...]]
 _DISCOVERY_CACHE: dict[DiscoveryCacheKey, dict[str, Any]] = {}
 SENSITIVE_FIELD_RE = re.compile(
-    r"(passphrase|password|passwd|secret|community|license|private.?key|shared.?key|token|credential)",
+    r"(passphrase|password|passwd|secret|community|license.?key|private.?key|shared.?key|token|credential)",
     re.IGNORECASE,
+)
+SENSITIVE_TEXT_RE = re.compile(
+    r"(?im)^(\s*(?:password|passwd|passphrase|secret|(?:snmp[-_ ]?)?community|token|private[-_ ]?key|"
+    r"shared[-_ ]?key|license[-_ ]?key)\b\s*(?:[:=]|\s)\s*)(.+)$"
 )
 
 __all__ = [
@@ -72,17 +90,59 @@ def _operation_result(
     status: str = "ok",
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
-    settings = _settings_for_target(target_node)
+    try:
+        settings = _settings_for_target(target_node)
+        base_url = settings.normalized_base_url
+        max_result_characters = settings.max_result_characters
+    except AOS8ClientError:
+        base_url = None
+        max_result_characters = get_settings().max_result_characters
+    sanitized_data = _redact_sensitive_values(data)
+    serialized_data = json.dumps(sanitized_data, indent=2, sort_keys=True, default=str)
+    combined_warnings = list(warnings or [])
+    if len(serialized_data) > max_result_characters:
+        sanitized_data = {
+            "_meta": {
+                "truncated": True,
+                "max_result_characters": max_result_characters,
+                "original_characters": len(serialized_data),
+            },
+            "preview": serialized_data[:max_result_characters],
+        }
+        combined_warnings.append("Response data was truncated before being returned to the MCP client.")
     return OperationResult(
         status=status,  # type: ignore[arg-type]
         target=ToolTarget(
             name=target_node or "default",
-            base_url=settings.normalized_base_url,
+            base_url=base_url,
             config_path=config_path,
         ),
-        warnings=warnings or [],
-        data=data,
+        warnings=combined_warnings,
+        data=sanitized_data,
     ).model_dump(mode="json")
+
+
+def _audit_event(
+    operation: str,
+    target_node: str | None,
+    started_at: float,
+    *,
+    outcome: str,
+    response_characters: int | None = None,
+) -> None:
+    """Emit a redacted structured event to stderr through standard logging."""
+    event: dict[str, Any] = {
+        "event": "aos8_mcp_downstream_call",
+        "operation": operation,
+        "target": target_node or "default",
+        "outcome": outcome,
+        "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+    }
+    if response_characters is not None:
+        event["response_characters"] = response_characters
+    event["correlation_id"] = str(uuid4())
+    event["action_class"] = "read"
+    emit_audit_event(event)
 
 
 async def _run_show(
@@ -91,8 +151,27 @@ async def _run_show(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     settings = _settings_for_target(target_node)
-    async with AOS8Client(settings) as client:
-        return await client.show_command(command, config_path=config_path)
+    policy = get_policy(settings)
+    normalized_command = policy.validate_show_command(command)
+    normalized_config_path = policy.validate_config_path(config_path)
+    started_at = time.perf_counter()
+    try:
+        async with AOS8Client(settings) as client:
+            result = await client.show_command(
+                normalized_command, config_path=normalized_config_path
+            )
+    except Exception:
+        _audit_event("show_command", target_node, started_at, outcome="error")
+        raise
+    sanitized = _redact_sensitive_values(result)
+    _audit_event(
+        "show_command",
+        target_node,
+        started_at,
+        outcome="ok",
+        response_characters=len(json.dumps(sanitized, default=str)),
+    )
+    return sanitized
 
 
 async def _get_config_object(
@@ -102,12 +181,29 @@ async def _get_config_object(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     settings = _settings_for_target(target_node)
-    async with AOS8Client(settings) as client:
-        return await client.get_config_object(
-            object_name,
-            config_path=config_path,
-            query_params=query_params,
-        )
+    policy = get_policy(settings)
+    normalized_object = policy.validate_config_object(object_name)
+    normalized_config_path = policy.validate_config_path(config_path) or "/md"
+    started_at = time.perf_counter()
+    try:
+        async with AOS8Client(settings) as client:
+            result = await client.get_config_object(
+                normalized_object,
+                config_path=normalized_config_path,
+                query_params=query_params,
+            )
+    except Exception:
+        _audit_event("get_config_object", target_node, started_at, outcome="error")
+        raise
+    sanitized = _redact_sensitive_values(result)
+    _audit_event(
+        "get_config_object",
+        target_node,
+        started_at,
+        outcome="ok",
+        response_characters=len(json.dumps(sanitized, default=str)),
+    )
+    return sanitized
 
 
 async def _list_config_endpoint(
@@ -125,13 +221,27 @@ async def _list_config_endpoint(
         }
 
     settings = _settings_for_target(target_node)
-    async with AOS8Client(settings) as client:
-        if endpoint == "object":
-            result = await client.list_config_objects(query_params=query_params)
-        elif endpoint == "container":
-            result = await client.list_config_containers(query_params=query_params)
-        else:
-            raise ValueError(f"Unsupported discovery endpoint: {endpoint}")
+    started_at = time.perf_counter()
+    try:
+        async with AOS8Client(settings) as client:
+            if endpoint == "object":
+                result = await client.list_config_objects(query_params=query_params)
+            elif endpoint == "container":
+                result = await client.list_config_containers(query_params=query_params)
+            else:
+                raise ValueError(f"Unsupported discovery endpoint: {endpoint}")
+    except Exception:
+        _audit_event(f"list_config_{endpoint}", target_node, started_at, outcome="error")
+        raise
+
+    result = _bound_raw_result(result, target_node)
+    _audit_event(
+        f"list_config_{endpoint}",
+        target_node,
+        started_at,
+        outcome="ok",
+        response_characters=len(json.dumps(result, default=str)),
+    )
 
     _DISCOVERY_CACHE[cache_key] = result
     return {**result, "_mcp_cache": {"hit": False, "endpoint": endpoint}}
@@ -166,7 +276,26 @@ def _redact_sensitive_values(value: Any) -> Any:
         return redacted
     if isinstance(value, list):
         return [_redact_sensitive_values(item) for item in value]
+    if isinstance(value, str):
+        return SENSITIVE_TEXT_RE.sub(r"\1<redacted>", value)
     return value
+
+
+def _bound_raw_result(result: dict[str, Any], target_node: str | None = None) -> dict[str, Any]:
+    """Prevent unbounded raw AOS8 output from being placed in the model context."""
+    sanitized = _redact_sensitive_values(result)
+    settings = _settings_for_target(target_node)
+    serialized = json.dumps(sanitized, indent=2, sort_keys=True, default=str)
+    if len(serialized) <= settings.max_result_characters:
+        return sanitized
+    return {
+        "_meta": {
+            "truncated": True,
+            "max_result_characters": settings.max_result_characters,
+            "original_characters": len(serialized),
+        },
+        "preview": serialized[: settings.max_result_characters],
+    }
 
 
 def _json_lines(value: Any) -> list[str]:
@@ -195,6 +324,19 @@ def _switch_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _ap_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in _as_list(result.get("AP Database")) if isinstance(row, dict)]
+
+
+def _client_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = _as_list(result.get("Users")) or _as_list(result.get("User Table"))
+    return [row for row in candidates if isinstance(row, dict)]
+
+
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _normalize_switch(row: dict[str, Any]) -> dict[str, Any]:
@@ -230,6 +372,25 @@ def _normalize_ap(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_client(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ip_address": _first_present(row, "IP", "IP Address", "User IP"),
+        "mac_address": _first_present(row, "MAC", "MAC Address", "User MAC"),
+        "username": _first_present(row, "Name", "User Name", "Username"),
+        "device_type": _first_present(row, "Type", "Device Type", "OS"),
+        "ap_name": _first_present(row, "AP name", "AP Name", "AP"),
+        "ssid": _first_present(row, "ESSID", "SSID"),
+        "bssid": _first_present(row, "BSSID"),
+        "radio": _first_present(row, "Radio", "Band"),
+        "phy": _first_present(row, "PHY", "Phy"),
+        "vlan": _first_present(row, "VLAN", "Vlan"),
+        "role": _first_present(row, "Role", "User Role"),
+        "aaa_profile": _first_present(row, "AAA Profile", "AAA profile"),
+        "association_state": _first_present(row, "Assoc", "Association"),
+        "authentication_state": _first_present(row, "Auth", "Authentication"),
+    }
+
+
 def _count_by(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -248,7 +409,12 @@ async def aos8_test_connection(target_node: str | None = None) -> dict[str, Any]
     try:
         result = await _run_show("show version", target_node=target_node)
         return _operation_result(
-            {"ok": True, "command": "show version", "result": result}, target_node=target_node
+            {
+                "ok": True,
+                "command": "show version",
+                "result": _bound_raw_result(result, target_node),
+            },
+            target_node=target_node,
         )
     except AOS8ClientError as exc:
         return _operation_result(
@@ -263,49 +429,57 @@ async def aos8_show_command(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Run a read-only Aruba AOS8 show command."""
-    return await _run_show(command, config_path=config_path, target_node=target_node)
+    return _bound_raw_result(
+        await _run_show(command, config_path=config_path, target_node=target_node), target_node
+    )
 
 
 @mcp.tool()
 async def aos8_get_version(target_node: str | None = None) -> dict[str, Any]:
     """Return Aruba AOS8 version information."""
-    return await _run_show("show version", target_node=target_node)
+    return _bound_raw_result(await _run_show("show version", target_node=target_node), target_node)
 
 
 @mcp.tool()
 async def aos8_get_switches(target_node: str | None = None) -> dict[str, Any]:
     """Return Mobility Conductor and managed-device inventory."""
-    return await _run_show("show switches", target_node=target_node)
+    return _bound_raw_result(await _run_show("show switches", target_node=target_node), target_node)
 
 
 @mcp.tool()
 async def aos8_get_access_points(target_node: str | None = None) -> dict[str, Any]:
     """Return the AOS8 AP database."""
-    return await _run_show("show ap database", target_node=target_node)
+    return _bound_raw_result(await _run_show("show ap database", target_node=target_node), target_node)
 
 
 @mcp.tool()
 async def aos8_get_clients(target_node: str | None = None) -> dict[str, Any]:
     """Return connected wireless clients."""
-    return await _run_show("show user-table", target_node=target_node)
+    return _bound_raw_result(await _run_show("show user-table", target_node=target_node), target_node)
 
 
 @mcp.tool()
 async def aos8_get_tunnels(target_node: str | None = None) -> dict[str, Any]:
     """Return datapath tunnel information."""
-    return await _run_show("show datapath tunnel", target_node=target_node)
+    return _bound_raw_result(
+        await _run_show("show datapath tunnel", target_node=target_node), target_node
+    )
 
 
 @mcp.tool()
 async def aos8_get_license_summary(target_node: str | None = None) -> dict[str, Any]:
     """Return AOS8 license information."""
-    return _redact_license_keys(await _run_show("show license", target_node=target_node))
+    return _bound_raw_result(
+        _redact_license_keys(await _run_show("show license", target_node=target_node)), target_node
+    )
 
 
 @mcp.tool()
 async def aos8_get_cluster_status(target_node: str | None = None) -> dict[str, Any]:
     """Return AOS8 cluster membership information."""
-    return await _run_show("show lc-cluster group-membership", target_node=target_node)
+    return _bound_raw_result(
+        await _run_show("show lc-cluster group-membership", target_node=target_node), target_node
+    )
 
 
 async def _managed_device_data(target_node: str | None = None) -> dict[str, Any]:
@@ -337,6 +511,40 @@ async def _ap_summary_data(target_node: str | None = None) -> dict[str, Any]:
     }
 
 
+async def _client_summary_data(target_node: str | None = None) -> dict[str, Any]:
+    rows = [
+        WirelessClient.model_validate(_normalize_client(row)).model_dump(mode="json")
+        for row in _client_rows(await _run_show("show user-table", target_node=target_node))
+    ]
+    return {
+        "total": len(rows),
+        "by_ssid": _count_by(rows, "ssid"),
+        "by_ap": _count_by(rows, "ap_name"),
+        "by_role": _count_by(rows, "role"),
+        "clients": rows,
+    }
+
+
+async def _wlan_config_data(
+    config_path: str,
+    target_node: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "ap_group": await _get_config_object(
+            "ap_group", config_path=config_path, target_node=target_node
+        ),
+        "virtual_ap": await _get_config_object(
+            "virtual_ap", config_path=config_path, target_node=target_node
+        ),
+        "ssid_prof": await _get_config_object(
+            "ssid_prof", config_path=config_path, target_node=target_node
+        ),
+        "aaa_prof": await _get_config_object(
+            "aaa_prof", config_path=config_path, target_node=target_node
+        ),
+    }
+
+
 @mcp.tool()
 async def aos8_get_managed_devices(target_node: str | None = None) -> dict[str, Any]:
     """Return normalized Mobility Conductor and managed-device inventory."""
@@ -347,6 +555,38 @@ async def aos8_get_managed_devices(target_node: str | None = None) -> dict[str, 
 async def aos8_get_ap_summary(target_node: str | None = None) -> dict[str, Any]:
     """Return normalized AP inventory and AP health summary."""
     return _operation_result(await _ap_summary_data(target_node), target_node=target_node)
+
+
+@mcp.tool()
+async def aos8_get_client_summary(target_node: str | None = None) -> dict[str, Any]:
+    """Return normalized connected-client inventory and counts."""
+    return _operation_result(await _client_summary_data(target_node), target_node=target_node)
+
+
+@mcp.tool()
+async def aos8_get_wlan_summary(
+    config_path: str = "/md",
+    target_node: str | None = None,
+) -> dict[str, Any]:
+    """Return normalized WLAN relationships and deterministic security findings."""
+    config = await _wlan_config_data(config_path, target_node)
+    wlans = [wlan.model_dump(mode="json") for wlan in build_wlan_profiles(config)]
+    findings = [finding.model_dump(mode="json") for finding in analyze_wlan_security(config)]
+    return _operation_result(
+        {
+            "total": len(wlans),
+            "config_path": config_path,
+            "wlans": wlans,
+            "findings": findings,
+        },
+        target_node=target_node,
+        config_path=config_path,
+        status=(
+            "attention"
+            if any(finding["severity"] in {"high", "medium"} for finding in findings)
+            else "ok"
+        ),
+    )
 
 
 @mcp.tool()
@@ -465,17 +705,7 @@ async def aos8_analyze_wlan_security(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Return deterministic WLAN-security findings with raw configuration evidence."""
-    config = {
-        "virtual_ap": await _get_config_object(
-            "virtual_ap", config_path=config_path, target_node=target_node
-        ),
-        "ssid_prof": await _get_config_object(
-            "ssid_prof", config_path=config_path, target_node=target_node
-        ),
-        "aaa_prof": await _get_config_object(
-            "aaa_prof", config_path=config_path, target_node=target_node
-        ),
-    }
+    config = await _wlan_config_data(config_path, target_node)
     findings = [finding.model_dump(mode="json") for finding in analyze_wlan_security(config)]
     return _operation_result(
         {"findings": findings, "config_path": config_path},
@@ -494,11 +724,14 @@ async def aos8_get_config_object(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Return a read-only AOS8 configuration object from the hierarchy."""
-    return await _get_config_object(
-        object_name,
-        config_path=config_path,
-        query_params=query_params,
-        target_node=target_node,
+    return _bound_raw_result(
+        await _get_config_object(
+            object_name,
+            config_path=config_path,
+            query_params=query_params,
+            target_node=target_node,
+        ),
+        target_node,
     )
 
 
@@ -509,8 +742,11 @@ async def aos8_list_config_objects(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """List native Aruba AOS8 configuration object names exposed by the controller."""
-    return await _list_config_endpoint(
-        "object", query_params=query_params, refresh=refresh, target_node=target_node
+    return _bound_raw_result(
+        await _list_config_endpoint(
+            "object", query_params=query_params, refresh=refresh, target_node=target_node
+        ),
+        target_node,
     )
 
 
@@ -521,8 +757,11 @@ async def aos8_list_config_containers(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """List native Aruba AOS8 configuration container names exposed by the controller."""
-    return await _list_config_endpoint(
-        "container", query_params=query_params, refresh=refresh, target_node=target_node
+    return _bound_raw_result(
+        await _list_config_endpoint(
+            "container", query_params=query_params, refresh=refresh, target_node=target_node
+        ),
+        target_node,
     )
 
 
@@ -536,6 +775,10 @@ async def aos8_plan_config_object_change(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Plan a native AOS8 config-object change without sending any write request."""
+    settings = _settings_for_target(target_node)
+    policy = get_policy(settings)
+    object_name = policy.validate_config_object(object_name)
+    config_path = policy.validate_config_path(config_path) or "/md"
     current = (
         await _get_config_object(
             object_name,
@@ -548,8 +791,7 @@ async def aos8_plan_config_object_change(
     )
 
     params = {"config_path": config_path}
-    if query_params:
-        params.update(query_params)
+    params.update(AOS8Client.validate_query_params(query_params))
 
     current_object_data = None
     if isinstance(current, dict):
@@ -559,7 +801,7 @@ async def aos8_plan_config_object_change(
 
     before_for_diff = current_object_data if current_object_data is not None else current
 
-    return {
+    return _bound_raw_result({
         "mode": "plan_only",
         "writes_executed": False,
         "save_executed": False,
@@ -579,7 +821,7 @@ async def aos8_plan_config_object_change(
             "No write_memory/save operation is included or executed.",
             "Sensitive-looking fields are redacted in the plan output.",
         ],
-    }
+    }, target_node)
 
 
 @mcp.tool()
@@ -589,8 +831,11 @@ async def aos8_get_ap_group_config(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Return AP group configuration from the AOS8 configuration datastore."""
-    return await _get_config_object(
-        "ap_group", config_path=config_path, query_params=query_params, target_node=target_node
+    return _bound_raw_result(
+        await _get_config_object(
+            "ap_group", config_path=config_path, query_params=query_params, target_node=target_node
+        ),
+        target_node,
     )
 
 
@@ -601,8 +846,11 @@ async def aos8_get_virtual_ap_profiles(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Return Virtual AP profile configuration from the AOS8 configuration datastore."""
-    return await _get_config_object(
-        "virtual_ap", config_path=config_path, query_params=query_params, target_node=target_node
+    return _bound_raw_result(
+        await _get_config_object(
+            "virtual_ap", config_path=config_path, query_params=query_params, target_node=target_node
+        ),
+        target_node,
     )
 
 
@@ -613,8 +861,11 @@ async def aos8_get_ssid_profiles(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Return SSID profile configuration from the AOS8 configuration datastore."""
-    return await _get_config_object(
-        "ssid_prof", config_path=config_path, query_params=query_params, target_node=target_node
+    return _bound_raw_result(
+        await _get_config_object(
+            "ssid_prof", config_path=config_path, query_params=query_params, target_node=target_node
+        ),
+        target_node,
     )
 
 
@@ -625,8 +876,11 @@ async def aos8_get_aaa_profiles(
     target_node: str | None = None,
 ) -> dict[str, Any]:
     """Return AAA profile configuration from the AOS8 configuration datastore."""
-    return await _get_config_object(
-        "aaa_prof", config_path=config_path, query_params=query_params, target_node=target_node
+    return _bound_raw_result(
+        await _get_config_object(
+            "aaa_prof", config_path=config_path, query_params=query_params, target_node=target_node
+        ),
+        target_node,
     )
 
 
@@ -634,6 +888,7 @@ register_prompts(mcp)
 
 
 def main() -> None:
+    configure_audit_logging(get_settings())
     mcp.run()
 
 

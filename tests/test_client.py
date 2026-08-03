@@ -29,6 +29,26 @@ def test_show_command_normalizes_whitespace() -> None:
     assert AOS8Client.validate_show_command("  show version  ") == "show version"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "show running-config",
+        "show version; reload",
+        "show ap database | exclude down",
+        "show user-table | include client | include another",
+    ],
+)
+def test_show_command_rejects_sensitive_or_unsafe_patterns(command: str) -> None:
+    with pytest.raises(AOS8ClientError):
+        AOS8Client.validate_show_command(command)
+
+
+def test_show_command_allows_single_include_filter() -> None:
+    assert AOS8Client.validate_show_command("show user-table | include aa:bb") == (
+        "show user-table | include aa:bb"
+    )
+
+
 def test_config_object_name_validation_accepts_safe_names() -> None:
     assert AOS8Client.validate_config_object_name("ssid_prof") == "ssid_prof"
     assert AOS8Client.validate_config_object_name("int_vlan") == "int_vlan"
@@ -40,6 +60,13 @@ def test_config_object_name_validation_rejects_paths() -> None:
         AOS8Client.validate_config_object_name("../write_memory")
 
 
+def test_query_parameter_validation_rejects_unbounded_or_unsafe_values() -> None:
+    with pytest.raises(AOS8ClientError):
+        AOS8Client.validate_query_params({"bad key": "value"})
+    with pytest.raises(AOS8ClientError):
+        AOS8Client.validate_query_params({"filter": "line one\nline two"})
+
+
 def test_parse_response_accepts_empty_success_body() -> None:
     response = httpx.Response(200, content=b"")
 
@@ -47,6 +74,15 @@ def test_parse_response_accepts_empty_success_body() -> None:
         "_data": [],
         "_meta": {"empty_response": True},
     }
+
+
+def test_error_responses_do_not_echo_response_body() -> None:
+    response = httpx.Response(500, json={"password": "must-not-leak"})
+
+    with pytest.raises(AOS8ClientError, match="HTTP 500") as exc_info:
+        AOS8Client._parse_response(response)
+
+    assert "must-not-leak" not in str(exc_info.value)
 
 
 def test_list_config_objects_uses_native_object_endpoint() -> None:

@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     request_timeout: float = 30.0
     retry_attempts: int = Field(default=3, ge=1, le=10)
     retry_backoff_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
+    max_result_characters: int = Field(default=200_000, ge=1_000, le=5_000_000)
+    additional_show_command_prefixes: list[str] = Field(default_factory=list)
+    allowed_config_objects: list[str] = Field(
+        default_factory=lambda: ["aaa_prof", "ap_group", "ssid_prof", "virtual_ap"]
+    )
+    allowed_config_path_roots: list[str] = Field(default_factory=lambda: ["/md", "/mm"])
+    audit_log_path: str | None = None
+    audit_log_max_bytes: int = Field(default=10_000_000, ge=10_000, le=1_000_000_000)
+    audit_log_backup_count: int = Field(default=5, ge=1, le=100)
     node_targets: dict[str, NodeTarget] = Field(default_factory=dict)
 
     @property
