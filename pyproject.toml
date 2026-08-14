@@ -26,6 +26,7 @@ dependencies = [
 
 [project.scripts]
 aos8-mcp-server = "aruba_aos8_mcp.server:main"
+aos8-mcp-check = "aruba_aos8_mcp.check:main"
 
 [project.urls]
 Homepage = "https://github.com/teze3808/aos8-mcp-server"

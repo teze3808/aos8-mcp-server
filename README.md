@@ -362,7 +362,7 @@ on the WPA2-PSK SSID.
 Install `uv` if you do not already have it, then run:
 
 ```bash
-uv sync
+uv sync --locked
 ```
 
 Create your local env file:
@@ -390,6 +390,36 @@ AOS8_ADDITIONAL_SHOW_COMMAND_PREFIXES=[]
 ```
 
 Do not commit `.env`.
+
+### Important Configuration Details
+
+The configuration names must include the `AOS8_` prefix. These names are
+required:
+
+| Purpose | Variable |
+| --- | --- |
+| AOS8 REST API URL | `AOS8_BASE_URL` |
+| Username | `AOS8_USERNAME` |
+| Password | `AOS8_PASSWORD` |
+| TLS certificate verification | `AOS8_VERIFY_SSL` |
+
+For most AOS8 Mobility Conductor deployments, include port `4343` in the URL:
+
+```env
+AOS8_BASE_URL=https://aos8-controller.example.com:4343
+```
+
+The server does not provide command-line flags such as `--base-url`, and it is
+not an interactive CLI. It reads settings from environment variables or from
+`.env` in the server working directory, then waits for an MCP client to call
+its tools. This is not a valid way to request AP data:
+
+```bash
+uv run aos8-mcp-server show ap status
+```
+
+Start the server through an MCP client, then call `aos8_test_connection`. After
+that succeeds, call `aos8_get_ap_summary` or `aos8_get_access_points`.
 
 This project is designed for a trusted, single-user local `stdio` deployment.
 Before exposing it remotely or to multiple users, add an authenticated transport,
@@ -482,6 +512,58 @@ Add this to your Claude Desktop MCP configuration after replacing the placeholde
 ```
 
 Restart Claude Desktop after editing the config.
+
+### LM Studio Bionic and Other Local LLM Clients
+
+For the complete field-by-field installation, validation checkpoints,
+small-model guidance, and symptom-based troubleshooting, see
+[`docs/lm-studio-bionic.md`](docs/lm-studio-bionic.md).
+
+Configure the server in the client's MCP/stdio server settings using the same
+command and environment variables. The model itself does not connect to AOS8
+directly; the MCP client starts this process and exposes its tools to the
+model.
+
+Use this configuration as the reference:
+
+```json
+{
+  "name": "aos8-mcp-server",
+  "type": "stdio",
+  "command": "uv",
+  "args": [
+    "run",
+    "--directory",
+    "/absolute/path/to/aos8-mcp-server",
+    "aos8-mcp-server"
+  ],
+  "env": {
+    "AOS8_BASE_URL": "https://aos8-controller.example.com:4343",
+    "AOS8_USERNAME": "your-username",
+    "AOS8_PASSWORD": "replace-with-your-password",
+    "AOS8_VERIFY_SSL": "true",
+    "AOS8_REQUEST_TIMEOUT": "30"
+  }
+}
+```
+
+The exact location of this JSON depends on the client. Do not paste the JSON
+into the model conversation and do not start the server in a separate terminal
+unless the client explicitly supports connecting to an already-running stdio
+process. After saving the client configuration, restart or reload its MCP
+servers and ask:
+
+```text
+Call aos8_test_connection. If it succeeds, call aos8_get_ap_summary and show the AP status.
+```
+
+If the client reports a Pydantic `ValidationError` saying `base_url`,
+`username`, or `password` is missing, check that the variables are named
+`AOS8_BASE_URL`, `AOS8_USERNAME`, and `AOS8_PASSWORD`, and that they are inside
+the MCP server's `env` block. If the server starts but the connection fails,
+check network reachability to `https://<controller>:4343` and use
+`AOS8_VERIFY_SSL=false` only for a lab controller with a self-signed
+certificate.
 
 ### Claude Code
 

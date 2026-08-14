@@ -278,3 +278,43 @@ def test_operation_result_has_stable_metadata(monkeypatch) -> None:
         "config_path": "/md/SE",
     }
     assert result["data"] == {"total": 1}
+
+
+def test_list_command_targets_has_no_warning_for_default_only() -> None:
+    result = anyio.run(server.aos8_list_command_targets)
+
+    assert result["warnings"] == []
+    assert result["data"]["targets"] == [
+        {
+            "name": "default",
+            "base_url": "https://aos8.example:4343",
+            "config_path": None,
+            "direct_node_api": False,
+        }
+    ]
+
+
+def test_list_command_targets_explains_named_targets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: Settings(
+            base_url="https://aos8.example:4343",
+            username="admin",
+            password="secret",
+            node_targets={
+                "md-1": {
+                    "base_url": "https://md-1.example:4343",
+                    "config_path": "/md/site-1",
+                }
+            },
+        ),
+    )
+
+    result = anyio.run(server.aos8_list_command_targets)
+
+    assert result["warnings"] == [
+        "Named direct-node targets use their own API endpoints. Pass a listed name as "
+        "target_node; omit target_node to use the default endpoint."
+    ]
+    assert result["data"]["targets"][1]["name"] == "md-1"

@@ -665,9 +665,13 @@ async def aos8_list_command_targets() -> dict[str, Any]:
         }
         for name, target in sorted(settings.node_targets.items())
     )
-    return _operation_result({"targets": targets}, warnings=[
-        "A configured target uses its own API endpoint. Use its name as target_node in operational tools."
-    ])
+    warnings = []
+    if settings.node_targets:
+        warnings.append(
+            "Named direct-node targets use their own API endpoints. Pass a listed name as "
+            "target_node; omit target_node to use the default endpoint."
+        )
+    return _operation_result({"targets": targets}, warnings=warnings)
 
 
 @mcp.tool()
